@@ -1,0 +1,38 @@
+#!/bin/bash
+#####################################################################
+#Program :						      						  		#
+#	Extract the optimized coordinate from a Gaussian      	  		#
+#	output file.					      					  		#
+#Input: 					    	       					  		#	
+#	$1=test.out; Gaussian output file                     	  		#
+#Output: 						      						  		#
+#	1. Std out						      						  	#
+#	2. *.xyz; user defined											#
+#####################################################################
+
+# 2012/04/22, Grace, 1st. ver.
+# 2016/10/24, Grace, 2nd. ver.
+
+#Step0. check
+[ "$1" == "" ] && \
+echo 'No 1st. arg., you must key-in the name of G09 output file' \
+&& exit
+judge=$(grep 'Stationary point found' $1)
+[ "$judge" == "" ] && echo 'Not optimized successfully' && exit
+[ "$2" == "" ] && \
+echo 'No 2nd. arg., please name a output file to store the rawdata' \
+&& exit
+
+#Step1. extract the coordinate
+rm -f coord.tmp coord.txt
+num=$(grep -w 'NAtoms' $1 | head -n 1 | awk '{print $2}' ) #count the number of atom
+grep -A $(($num+4)) 'Input orientation:' $1 | tail -n $num > coord.tmp
+#grep -A $(($num+4)) 'Standard orientation:' $1 | tail -n $num > coord.tmp
+awk '{print $2,$4,$5,$6}' coord.tmp > $2
+
+#Step2. print the result
+echo "# of atoms is $num"
+echo " "
+cat $2
+rm -f coord.tmp 
+

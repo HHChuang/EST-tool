@@ -1,0 +1,277 @@
+#!/bin/bash
+#############################################################################
+#	Program : 																#
+#			Check the status of G09 output file.							#
+#			- classification has SP, MIN, Saddle and IRC					#
+#			- it has single job version and benchmark version				#
+#			- history: merge the function of checkGauOPT and checkGauPES 	#
+#			  and getGauEandZPE												#		
+#																			#
+#	Input : 																#
+#			single job verion : $1 = test.log 								#
+#			benchmark version : $1 = all									#
+#	Output : 																#
+#			Std-out															#
+#############################################################################
+
+# 2016/11/03, Grace, 1st. ver.
+
+# Step 1. Check the status of input argument and std-out the purpose 
+echo ""
+echo "Program $0 will check and alanyse G09 output files "
+echo "working directory: $(pwd) "
+echo ""
+echo "The extension of output file is : .log"
+echo ""
+
+[ "$1" == "" ] && \
+echo 'No argument, please key-in "all" or the name of G09 output file (*.log)' \
+&& exit
+
+# Step 2. Depend on the selected version, extract the raw data
+
+# set the function ##########################################################
+	# count and list the imaginary frequency ################################
+	function countIF(){
+		# input : test.log; gaussian output file
+		# output : IF.txt
+
+		# extract all frequency
+		grep -w 'Frequencies --' $1|grep -v 'Frequencies ---' \
+        |awk '{print $3,$4,$5}' > FreqList
+        awk '{print $1}' FreqList > FreqListColumn
+        awk '{print $2}' FreqList >> FreqListColumn
+        awk '{print $3}' FreqList >> FreqListColumn
+		# count the amount of IF
+        NumIF=$(grep -c '-' FreqList)
+		echo $NumIF > tmp0.txt
+		if [ "$NumIF" == "0" ]
+		then
+			# SP or MIN
+			touch tmp1.txt
+		else
+			# Saddle, extract the IF
+			rm -f tmp1.txt
+			for (( i=1; i<=$NumIF; i++ ))
+        	do
+        		head -n $i FreqListColumn | tail -n 1 >> tmp1.txt
+	        done
+		fi
+		paste tmp0.txt tmp1.txt > IF.txt
+		rm -f FreqList FreqListColumn tmp0.txt tmp1.txt
+	}
+	# extract the energy ###################################################
+	function extractE(){
+		# input : test.log; gaussian output file
+        # output : E.txt
+
+	    #The keyword for MP2 is 'EUMP2',and for CCSD is 'CORR'. Others
+    	#are 'SCF Done'.
+   		method=$(grep ' CORR ' $1|tail -n 1)
+		[ "$method" == '' ] && method=$(grep 'EUMP2' $1|tail -n 1) \
+		|| method='CORR'
+    	if [ "$method" != 'CORR' ]; then
+			[ "$method" == '' ] && method='SCF Done' || method='EUMP2'
+	    fi
+	    rowE=$(grep "$method" $1 | tail -n 1)
+    	case $method in
+	    "CORR")
+    		E=$(echo $rowE | awk '{print $4}')
+      		;;
+	    "EUMP2")
+			E=$(echo $rowE | awk '{print $6}' | sed 's/D/E/g' ) 
+      		;;
+	    "SCF Done")
+			E=$(echo $rowE | awk '{print $5}')
+ 		;;
+	    esac 
+		echo $E >> E.txt
+	}
+	# extract thezero point energy #########################################
+    function extractZPE(){
+        # input : test.log; gaussian output file
+        # output : ZPE.txt
+
+		method=$(grep ' CORR ' $1|tail -n 1)
+        [ "$method" == '' ] && method=$(grep 'EUMP2' $1|tail -n 1) \
+        || method='CORR'
+        if [ "$method" != 'CORR' ]; then
+            [ "$method" == '' ] && method='SCF Done' || method='EUMP2'
+        fi
+
+        ZPE=$(grep 'Zero-point correction' $1|tail -n 1| awk '{print $3}')
+
+		if [ "$method" == "CORR" ]; then
+            ZPE=0
+        fi
+
+        echo $ZPE >> ZPE.txt
+    }
+	# extract the IRC information ###########################################
+	function IRC(){
+		# input : test.log; gaussian output file
+        # output : irc.txt
+
+		tmp=$(grep '# OF POINTS ALONG THE PATH =' $1 | tail -n 1 \
+			  |awk '{print $8}')	
+		pts=$(($tmp+1))
+		TS=$(grep 'Energies reported relative to the TS energy of' $1 \
+			 | awk '{print $9}' )
+		R=$(grep -A 3 'Summary of reaction path following' $1 | tail -n 1 \
+			| awk '{print $2}')
+		P=$(grep -A $(($pts+2)) 'Summary of reaction path following' $1 | \
+			tail -n 1 | awk '{print $2}')
+		echo $pts $R $TS $P > irc.txt
+	}
+# major part ################################################################
+
+# Creat the list which records all G09 output file ##########################
+case $1 in 
+	"all") # benchmark mode
+        ls | grep .log | sed 's/.log//g' > list.txt
+        NumJobs=$(wc -l list.txt | awk '{print $1}')
+	;;
+	*) # single job mode
+		echo $1 | sed 's/.log//g' > list.txt
+		NumJobs=$(echo 1)
+	;;
+esac
+
+# check the job is sucess of fail ###########################################
+# input : list.txt $NumJobs
+# output : statistic.txt
+rm -f statistic.txt 
+for (( i=1; i<=$NumJobs; i++ ))
+do
+	name=$(head -n $i list.txt | tail -n 1 )
+	# check the existence of argument
+    test -e $name.log || echo "file $name.log is not exist" | exit
+	End=$(grep -c 'Normal termination' $name.log)
+    if [ "$End" == "0" ]
+    then
+    	# Error termination
+        stat=$(echo Fail) 
+    else
+        # Normal termination
+        stat=$(echo Success)
+	fi
+	echo $name $stat >> statistic.txt
+done
+rm -f list.txt
+# 1. check the status of jobs: SP, MIN, Saddle or IRC #########################
+# 2. alalyse the result of jobs, call function: countIF, extractE extractZPE ##
+#	 and IRC ######
+# input : statistic.txt
+# output : class.txt (SP.txt,MIN.txt,Saddle.txt,IRC.txt)
+rm -f class.txt SP.txt MIN.txt Saddle.txt IRC.txt
+grep Success statistic.txt > list.txt
+NumJobs=$(grep -c Success statistic.txt)
+for (( k=1; k <= $NumJobs; k++ ))
+do 
+	name=$(head -n $k list.txt | tail -n 1  | awk '{print $1}')
+	echo $name > name.txt
+    # check it is IRC or  not
+    IRC=$(grep -c 'Summary of reaction path following' $name.log)
+    if [ "$IRC" == "0" ]
+    then
+        # check it is Saddle or MIN or SP
+        countIF $name.log
+        # extract the energy 
+        extractE $name.log
+        NumIF=$(head -n 1 IF.txt | awk '{print $1}')
+        if [ "$NumIF" == "0" ]
+        then
+			# IF is not exist
+          	SP=$(grep 'Frequencies' $name.log)
+            if [ "$SP" == "" ]
+            then
+                status=$(echo SP) 
+                paste name.txt E.txt >> SP.txt
+            else
+				extractZPE $name.log
+                status=$(echo MIN)
+                paste name.txt E.txt ZPE.txt >> MIN.txt
+            fi
+        else
+			# IF is exist
+			extractZPE $name.log
+            status=$(echo Saddle)
+            paste name.txt E.txt ZPE.txt IF.txt >> Saddle.txt
+        fi
+    else
+        # this is IRC result
+        status=$(echo IRC)
+        IRC $name.log
+        paste name.txt irc.txt >> IRC.txt
+    fi
+	echo $name $status >> class.txt
+    rm -f name.txt status.txt irc.txt IF.txt E.txt ZPE.txt 
+done
+rm -f list.txt
+
+# analyse the amount of jobs ###################################################
+Total=$(wc -l statistic.txt|awk '{print $1}')
+Success=$(grep -c Success statistic.txt)
+Fail=$(grep -c Fail statistic.txt)
+SP=$(grep -c SP class.txt)
+MIN=$(grep -c MIN class.txt)
+Saddle=$(grep -c Saddle class.txt)
+IRC=$(grep -c IRC class.txt)
+
+# Step 3. Std-out the information, and then delete the temporary files. 
+echo 'Std-out the information of rawdata'
+echo ""
+echo "Count the amount of jobs:"
+printf '%8s\t %5i\t \n' $(echo Total: $Total)
+printf '%8s\t %5i\t \n' $(echo Success: $Success)
+printf '%8s\t %5i\t \n' $(echo Fail: $Fail)  
+echo ""
+
+if [ -f class.txt ]
+then
+    echo "Classification of the successful jobs:"
+    printf '%8s\t %5i\t \n' $(echo SP: $SP)
+    printf '%8s\t %5i\t \n' $(echo MIN: $MIN)
+    printf '%8s\t %5i\t \n' $(echo Saddle: $Saddle)
+    printf '%8s\t %5i\t \n' $(echo IRC: $IRC)
+    echo ""
+    echo "Detail of output: "
+
+    if [ -f SP.txt ]
+    then
+        echo ""
+        echo '----- SP -----'
+        printf '%10s\t %16s\t  \n' $(echo Name E\(hartree\))
+        printf '%10s\t %16.10f\t \n' $(cat SP.txt)
+    fi
+
+    if [ -f MIN.txt ]
+    then
+        echo ""
+        echo '----- MIN -----'
+        printf '%10s\t %16s\t %16s\t \n' $(echo Name E\(hartree\) ZPE\(hartree\))
+        printf '%10s\t %16.10f\t %16.10f\t \n' $(cat MIN.txt)
+    fi
+
+    if [ -f Saddle.txt ]
+    then
+        echo ""
+        echo '----- Saddle -----'
+        printf '%10s\t %16s\t %16s\t %3s\t %10s\t \n' \
+        $(echo Name E\(hartree\) ZPE\(hartree\) \#IF IF\(cm^1\))
+        printf '%10s\t %16.10f\t %16.10f\t %2i\t %10.4f\n' $(cat Saddle.txt)
+    fi
+
+    if [ -f IRC.txt ]
+    then
+        echo ""
+        echo '----- IRC -----'
+        printf '%10s\t %4s\t %16s\t %16s\t %16s\t \n' \
+        $(echo Name \#IRC rel_R\(hartree\) TS\(hartree\) rel_P\(hartree\))
+        printf '%10s\t %4i\t %16.10f\t %16.10f\t %16.10f\n' \
+        $(cat IRC.txt)
+    fi
+
+    rm -f statistic.txt class.txt SP.txt MIN.txt Saddle.txt IRC.txt
+fi
+

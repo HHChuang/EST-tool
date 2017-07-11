@@ -1,0 +1,66 @@
+#!/bin/bash
+#####################################################################
+#	Program :														#
+#				Change the energy unit from Hartree to eV			#
+#	Input :															#
+#			$1 = *.txt												#
+#	Output :														#
+#			PES_eV.txt												#
+##################################################################### 
+
+# 2016/10/12, Grace, 1st. ver.
+
+# Step 0. Check the existance of input file
+[ "$1" == "" ] && echo 'No input argument, stop the program.' && exit
+[ -f "$1" ] || echo "File is not exist" 
+[ -f "$1" ] || exit
+# Step 1. Get the number of grid points
+#		  Get the number of state
+num_pts=$(wc $1|awk '{print $1}')
+num_column=$(awk -F ' ' 'NR==2{print NF}' $1)
+	# fix bug, 2016/09/09, Grace. if the first row is not completed
+	
+num_state=$(($num_column-1))
+# Step 2. Decide the energy reference, and then change the energy unit 
+#		  from Hartree to kcal/mol
+ref=$(awk '{print $2}' $1|head -n 1)
+if [ "$ref" == '' ]
+then 
+	ref=$(echo 0)
+fi
+
+for energy in `awk '{print $2}' $1`
+do 
+	judge=`echo $ref '>' $energy | bc -l`
+	if  [ $judge == 1 ]
+	then
+		ref=$(echo $energy)
+	fi
+done
+
+rm -f tmp*.txt
+for (( i=2; i<=$num_column; i++))
+do
+	awk "{print \$$i}" $1 > list.txt
+	line=$(wc list.txt | awk '{print $1}')
+	for (( j=1;j<=$line;j++))
+	do 
+		energy=$(head -n $j list.txt | tail -n 1)
+		if [ "$energy" == "" ] 
+		then
+			echo "" >> tmp$i.txt
+		else
+			echo "( $energy - $ref ) * 27.212" | bc >> tmp$i.txt
+		fi
+	done
+done
+# Step 3. Store all information into file PES_kcal.txt
+awk '{print $1}' $1 > x.txt
+line=$(echo x.txt)
+for (( i=2; i<=$num_column; i++))
+do
+	line=$(echo "$line tmp$i.txt")
+done
+paste `echo $line` > PES_eV.txt
+rm -f x.txt list.txt tmp*.txt
+

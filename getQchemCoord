@@ -1,0 +1,55 @@
+#!/bin/bash
+###############################################################
+#Program :						      						  #
+#	Extract the optimized coordinate from a QChem output file #
+#Input: 					    	       					  #	
+#	$1 = test.out; QChem output file                     	  #
+#	$2 = *.xyz; user defined								  #
+#Output: 						      						  #
+#	Std out						      						  #
+#	*.xyz; user defined										  #
+###############################################################
+
+# 2016/04/12, Grace, 1st. ver.
+# 2016/10/19, Grace, 2nd. ver. user define the name of output
+# 2017/01/12, Grace, 3rd. ver. add comment line (#...) and 
+#							   amount of atom for jmol as well 
+#							   as IQmol
+
+#Step0. check
+[ "$1" == "" ] && \
+echo 'No 1st. arg., you must key-in the name of qchem output file' \
+&& exit
+judge=$(grep 'OPTIMIZATION CONVERGED' $1)
+[ "$judge" == "" ] && echo 'Not optimized successfully' && exit
+[ "$2" == "" ] && \
+echo 'No 2nd. arg., please name a output file to store the rawdata' \
+&& exit
+
+#Step1. extract the coordinate
+rm -f coord.tmp 
+num=$(grep -a1 'NAtoms' $1 | tail -n 1 | awk '{print $1}' ) #count the number of atom
+grep -A $(($num+2)) 'Orientation' $1 | tail -n $num | \
+awk '{print $2 "\t" $3 "\t" $4 "\t" $5}' > coord.tmp
+E=$(grep 'Total energy in the final basis set =' $1 | tail -n 1| awk '{print $9}')
+sym=$(grep 'Molecular Point Group' $1 | tail -n 1 | awk '{print $4}')
+basis=$(grep 'Requested basis set is' $1| tail -n 1 | awk '{print $5}')
+method=$(grep -i 'method' $1| tail -n 1 | awk '{print $2}')
+if [ "$method" == "" ] 
+then
+	method=$(grep -i 'exchange' $1 | tail -n 1 | sed 's/Exchange//g' )
+fi
+
+echo $num > $2
+echo "# $1 $method/$basis $sym" >> $2
+cat  coord.tmp >> $2
+
+#Step2. print the result
+echo "# of atoms is $num"
+echo "Level of theory: $method/$basis"
+echo "Point group: $sym"
+echo "Produce a file names $2"
+echo " "
+cat coord.tmp
+rm -f coord.tmp  
+
