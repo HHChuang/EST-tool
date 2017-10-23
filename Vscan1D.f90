@@ -3,7 +3,7 @@
 !               Produce a serious of structure along a selected !
 !               coordinate.                                     !
 !   Input :                                                     !
-!           $1 = initial structure in xyz formate               !
+!           $1 = Gaussian/Qchem output file; initial structure  !
 !           $2 = vector (xyz coordinate)                        !
 !           $3 = boundary condition                             !
 !                formate of $3                                  !
@@ -15,11 +15,11 @@
 !                   interval=1/$3                               !
 !                   i.e. $3=10 ; interval=1/10=0.1 angstrom     !
 !   Output :                                                    !
-!           *.dat; User define the name                                             !
+!           *.xyz; User define, and it can be used in Jomol.    !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 ! 2016/04/12, Grace, 1st. ver.
-! 2017/10/23, Grace, 2nd. ver.
+! 2017/10/23, Grace, 2nd. ver. modify input and auxiliary scripts
 
 Program main
     implicit none
@@ -31,20 +31,10 @@ Program main
     ! The output file of qchem record the atom name as character
     character(len=2),allocatable,dimension(:)   :: AtomName
     real(8) :: indexR ! in order to print the coordinate
-! Step 0. Std-out the purpose of this program
-    write(*,'()')
-    write(*,'(A)') '--------------------------------------'
-    write(*,'(A)') 'Program Vscan will produce a serious'
-    write(*,'(A)') 'of structures along a given vector.'
-    write(*,'(A)') '--------------------------------------'
-    write(*,'()')
-    write(*,'(A)') 'Auxiliary script and file'
-    write(*,'(A)') '1. getQchemCoord; coord.txt'
-    write(*,'(A)') '2. getQchemNM; NM.txt'
-    write(*,'()')
-    write(*,'(A)') 'The output file named pes.txt and it can'
-    write(*,'(A)') 'be visualized by Jmol.'
-    write(*,'()')
+
+! Step 0.   Std-out the purpose of this program, and check the
+!           status of input file. 
+    call print_purpose()
 ! Step 1. Extract the coordinate and boundary from input file
    ! The first argument; input file = coordinate
     call GETARG(1,input)
@@ -142,6 +132,29 @@ Program main
     end do
     close(10)
 end program main
+
+subroutine print_purpose()
+    implicit none
+    write(*,'()')
+    write(*,'(A)') '-------------------------------------------------'
+    write(*,'(A)') 'Program Vscan1D produces a serious of structure'
+    write(*,'(A)') 'along a given reaction coordinate.'
+    write(*,'(A)') '-------------------------------------------------'
+    write(*,'()')
+    write(*,'(A)') 'Auxiliary script and file'
+    write(*,'(A)') '1. script: getCoord'
+    write(*,'(A)') '   output: coord.xyz'
+    write(*,'(A)') '           (afford Gaussian/QChem jobs, 2017/10/23)'
+    write(*,'(A)') '2. script: getNM'
+    write(*,'(A)') '   output: NM.dat'
+    write(*,'(A)') '           (afford QChem jobs only, 2017/10/23)' 
+    write(*,'()')
+    write(*,'(A)') 'Final output: *.xyz'
+    write(*,'(A)') '              (user define the name and it can be'
+    write(*,'(A)') '               visualized by Jmol)'
+    write(*,'()')
+return
+end subroutine print_purpose
 
 subroutine get_coord(NAtoms,Coord,AtomName)
     implicit none

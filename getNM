@@ -1,14 +1,15 @@
 #!/bin/bash
 #########################################################################
 #	Program :															#
-#		Extract the normal mode eigenvector								#
+#		Extract the normal mode eigenvector	from Gaussian/QChem job		#
 #	Input :																#
 #		$1 = test.out; QChem output file								#
 #	Output :															#
 #		NM.txt															#
 #########################################################################
 
-#2016/04/12, Grace, 1st. ver.
+# 2016/04/12, Grace, 1st. ver.
+# 2017/10/23, Grace, 2nd. ver. 
 
 #Step0. check
 [ "$1" == "" ] && echo 'No file, you must key-in the name of qchem output file' && exit
@@ -25,7 +26,7 @@ dof=$(grep 'Number of degrees of freedom' $1| tail -n 1 | awk '{print $9}')
 grep -A $((7+$num)) 'Mode:' $1 | grep -v '\-\-' | grep -v 'Mode' \
 | grep -v 'Frequency'| grep -v 'Force Cnst'| grep -v 'Red. Mass' \
 | grep -v 'IR Active' | grep -v 'IR Intens' | grep -v 'Raman Active' \
-| grep -v 'X      Y      Z' > rawdata.txt
+| grep -v 'X      Y      Z' > rawdata.txt 
 row=$(($mode/3+1))
 column=$(($mode%3))
 head -n $(($num*$row)) rawdata.txt | tail -n $num > tmp.txt
