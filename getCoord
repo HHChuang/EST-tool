@@ -1,0 +1,80 @@
+#!/bin/bash
+#####################################################################
+#Program :						      						  		#
+#	Extract the optimized coordinate from a Gaussian/QChem      	#
+#	output file.					      					  		#
+#Input: 					    	       					  		#	
+#	$1=test; Gaussian/QChem output file                     	    #
+#Output: 						      						  		#
+#	1. Std out						      						  	#
+#	2. *.xyz; user defined (can be used in Jmol)					#
+#####################################################################
+
+# 2012/04/22, Grace, 1st. ver.
+# 2016/10/24, Grace, 2nd. ver.
+# 2017/10/23, Grace, 3nd. ver. combine Gaussian and QChem
+
+#Step0. check the status of input file
+[ "$1" == "" ] && \
+echo 'No 1st. arg., you must key-in the name of G09/QChem output file' \
+&& exit
+GorQ=$(grep ' Gaussian, Inc' $1 | tail -n 1)
+if [ "$GorQ" == "" ] ; then
+    GorQ=$(grep 'Q-Chem' $1 | tail -n 1)
+    [ "$GorQ" == ""] && echo 'Unknown job type, exit.' && exit
+    GorQ=true # this is a Gaussian job
+else
+    GorQ=false # this is a QChem job
+fi
+if [ $GorQ ] ; then
+    judge=$(grep 'Stationary point found' $1)
+else
+    judge=$(grep 'OPTIMIZATION CONVERGED' $1)
+fi
+[ "$judge" == "" ] && echo 'Not optimized successfully' && exit
+[ "$2" == "" ] && \
+echo 'No 2nd. arg., please name an output file to store the rawdata' \
+&& exit
+
+#Step1. extract the coordinate
+rm -f coord.tmp
+if [ $GorQ ] ; then 
+    # Gaussian
+    num=$(grep -w 'NAtoms' $1 | head -n 1 | awk '{print $2}' )
+    grep -A $(($num+4)) 'Input orientation:' $1 | tail -n $num > coord.tmp
+    #grep -A $(($num+4)) 'Standard orientation:' $1 | tail -n $num > coord.tmp
+    awk '{print $2,$4,$5,$6}' coord.tmp > $2
+    E=$(grep 'SCF Done' $1 | tail -n 1 | awk '{print $5')
+    sym=$(grep 'point group' $1 | tail -n 1 | awk '{print $4')
+    basis=$(grep 'Standard basis' $1 | tail -n 1 | awk '{print $3')
+    method=$(grep 'SCF Done:' $1 | tail -n 1 | awk 'print $3' \
+            | sed 's/E(//g' | sed 's/)//g')
+else
+    # QChem
+    num=$(grep -a1 'NAtoms' $1 | tail -n 1 | awk '{print $1}' )
+    grep -A $(($num+2)) 'Orientation' $1 | tail -n $num | \
+    awk '{print $2 "\t" $3 "\t" $4 "\t" $5}' > coord.tmp
+    E=$(grep 'Total energy in the final basis set =' $1 | tail -n 1 \
+        | awk '{print $9}')
+    sym=$(grep 'Molecular Point Group' $1 | tail -n 1 | awk '{print $4}')
+    basis=$(grep 'Requested basis set is' $1| tail -n 1 | awk '{print $5}')
+    method=$(grep -i 'method' $1| tail -n 1 | awk '{print $2}')
+    if [ "$method" == "" ] 
+    then
+	    method=$(grep -i 'exchange' $1 | tail -n 1 | sed 's/Exchange//g' )
+    fi
+fi
+
+#Step2. print the result
+echo $num > $2
+echo "# $1 $method/$basis $sym" >> $2
+cat  coord.tmp >> $2
+
+echo "File names: $2"
+echo "# of atoms is $num"
+echo "Level of theory: $method/$basis"
+echo "Point group: $sym"
+echo " "
+cat coord.tmp
+rm -f coord.tmp  
+

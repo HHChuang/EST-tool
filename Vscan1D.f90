@@ -15,7 +15,7 @@
 !                   interval=1/$3                               !
 !                   i.e. $3=10 ; interval=1/10=0.1 angstrom     !
 !   Output :                                                    !
-!           pes.txt                                           !
+!           *.dat; User define the name                                             !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 ! 2016/04/12, Grace, 1st. ver.
@@ -37,8 +37,6 @@ Program main
     write(*,'(A)') 'Program Vscan will produce a serious'
     write(*,'(A)') 'of structures along a given vector.'
     write(*,'(A)') '--------------------------------------'
-    write(*,'()')
-    write(*,'(A)') 'The vector should be normalized'
     write(*,'()')
     write(*,'(A)') 'Auxiliary script and file'
     write(*,'(A)') '1. getQchemCoord; coord.txt'
