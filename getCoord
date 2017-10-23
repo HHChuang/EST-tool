@@ -44,9 +44,9 @@ if [ $GorQ ] ; then
     grep -A $(($num+4)) 'Input orientation:' $1 | tail -n $num > coord.tmp
     #grep -A $(($num+4)) 'Standard orientation:' $1 | tail -n $num > coord.tmp
     awk '{print $2,$4,$5,$6}' coord.tmp > $2
-    E=$(grep 'SCF Done' $1 | tail -n 1 | awk '{print $5')
-    sym=$(grep 'point group' $1 | tail -n 1 | awk '{print $4')
-    basis=$(grep 'Standard basis' $1 | tail -n 1 | awk '{print $3')
+    E=$(grep 'SCF Done' $1 | tail -n 1 | awk '{print $5}')
+    sym=$(grep 'point group' $1 | tail -n 1 | awk '{print $4}')
+    basis=$(grep 'Standard basis' $1 | tail -n 1 | awk '{print $3}')
     method=$(grep 'SCF Done:' $1 | tail -n 1 | awk 'print $3' \
             | sed 's/E(//g' | sed 's/)//g')
 else
