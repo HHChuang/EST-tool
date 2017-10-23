@@ -1,0 +1,47 @@
+#!/bin/bash
+#########################################################################
+#	Program :															#
+#		Extract the normal mode eigenvector								#
+#	Input :																#
+#		$1 = test.out; QChem output file								#
+#	Output :															#
+#		NM.txt															#
+#########################################################################
+
+#2016/04/12, Grace, 1st. ver.
+
+#Step0. check
+[ "$1" == "" ] && echo 'No file, you must key-in the name of qchem output file' && exit
+judge=$(grep 'VIBRATIONAL ANALYSIS' $1)
+[ "$judge" == "" ] && echo 'Not calculate the frequency successfully' && exit
+
+#Step2. select the number of normal mode; stdin
+read -p 'Select the nimber of normal mode: ' mode
+
+#Step3. extract the normal mode vector
+rm -f rawdata.txt tmp.txt NM.txt
+num=$(grep -a1 'NAtoms' $1 | tail -n 1 | awk '{print $1}' ) #count the number of atom
+dof=$(grep 'Number of degrees of freedom' $1| tail -n 1 | awk '{print $9}') 
+grep -A $((7+$num)) 'Mode:' $1 | grep -v '\-\-' | grep -v 'Mode' \
+| grep -v 'Frequency'| grep -v 'Force Cnst'| grep -v 'Red. Mass' \
+| grep -v 'IR Active' | grep -v 'IR Intens' | grep -v 'Raman Active' \
+| grep -v 'X      Y      Z' > rawdata.txt
+row=$(($mode/3+1))
+column=$(($mode%3))
+head -n $(($num*$row)) rawdata.txt | tail -n $num > tmp.txt
+case $column in
+	"1")
+	awk '{print $2,$3,$4}' tmp.txt > NM.txt
+	;;
+	"2")
+	awk '{print $5,$6,$7}' tmp.txt > NM.txt
+	;;
+	"0")
+	awk '{print $8,$9,$10}' tmp.txt > NM.txt
+	;;
+esac
+
+#Step3. print the result
+echo 'The extract normal mode vector is '
+cat NM.txt
+rm -f rawdata.txt tmp.txt  

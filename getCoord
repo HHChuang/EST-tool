@@ -59,7 +59,7 @@ else
     E=$(grep 'Total energy in the final basis set =' $1 | tail -n 1 \
         | awk '{print $9}')
     sym=$(grep 'Molecular Point Group' $1 | tail -n 1 | awk '{print $4}')
-    basis=$(grep 'Requested basis set is' $1| tail -n 1 | awk '{print $5}')
+    basis=$(grep 'Requested bas]is set is' $1| tail -n 1 | awk '{print $5}')
     method=$(grep -i 'method' $1| tail -n 1 | awk '{print $2}')
     if [ "$method" == "" ] 
     then
