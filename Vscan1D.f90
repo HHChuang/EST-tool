@@ -54,11 +54,11 @@ Program main
     
     if (RxnCoord) then
         ! Normal mode
+        write(*,'(A)') 'Normal mode is not finish yet'
         stop ! not yet, 2017/10/24
     else
         ! Local mode; full local mode
         call GETARG(2,input)
-        write(*,'(A)') 'The order of atoms must be the same!'
         call get_LM(input,NAtoms,Coord,Vec)
     end if
     
@@ -151,6 +151,7 @@ subroutine get_coord(NAtoms,Coord,AtomName)
 return
 end subroutine get_coord
 
+! two sub-category: full LM and partial LM
 subroutine get_LM(input,NAtoms,Coord,Vec)
     implicit none
     character(len=100),intent(in)  :: input
@@ -159,20 +160,56 @@ subroutine get_LM(input,NAtoms,Coord,Vec)
     real(8),dimension(NAtoms,3),intent(inout)   :: Vec
     character(len=100)  :: buffer
     real(8),dimension(NAtoms,3) :: Coord_final
-    integer(4)  :: i,j
-    call SYSTEM('getCoord '//TRIM(input)//' final.xyz')
-    open(10,file='final.xyz',status='old',action='read')
+    integer(4)  :: i,j,Mode,n
+    real(4),allocatable,dimension(:)    :: movingAtom
+
+    write(*,'(A)') 'Is the final state a Gaussian/Qchem output? (y/n)'
+    read(*,*) buffer
+    if ( buffer .eq. 'y') then
+        call SYSTEM('getCoord '//TRIM(input)//' final.xyz')
+        open(10,file='final.xyz',status='old',action='read')
+    else if ( buffer .eq. 'n' ) then
+        open(10,file=input,status='old',action='read')
+    else
+        write(*,'(A)') 'Wrong typing! Stop.'
+        STOP
+    end if
     read(10,*) buffer
     read(10,*) buffer
     do i=1,NAtoms
         read(10,*) buffer,Coord_final(i,1:3)
     end do
-    do i = 1,NAtoms
-        do j = 1,3
-            Vec(i,j) = Coord_final(i,j) - Coord(i,j)
+
+    write(*,'()')
+    write(*,'(A)') 'This reaction coordinate follow local mode (LM)'
+    write(*,'()')
+    write(*,'(A)') 'The order of atom for initial and final'
+    write(*,'(A)') 'molecules must be the same!'
+    write(*,'()')
+    write(*,'(A)') 'Which mode do you prefer: (1 or 2)'
+    write(*,'(A)') '1. Full LM: move all atoms '
+    write(*,'(A)') '2. Partial LM: assign certain atom(s)'
+    read(*,*) Mode
+    Vec(:,:) = 0.0D0
+    if ( Mode .eq. 1) then
+        do i = 1,NAtoms
+            do j = 1,3
+                Vec(i,j) = Coord_final(i,j) - Coord(i,j)
+            end do
         end do
-    end do
-    close(10,status='delete')
+    else if ( Mode .eq. 2 ) then
+        write(*,'(A)',advance='no') 'How many atom: '
+        read(*,*) n
+        allocate(movingAtom(n))
+        do i = 1,n
+            write(*,'(A)') 'Please assign the index of moving atom'
+            read(*,*) movingAtom(i)
+            do j = 1, 3
+                Vec(movingAtom(i),j) = Coord_final(movingAtom(i),j) - Coord(movingAtom(i),j)
+            end do
+        end do
+    end if
+    close(10)
 return
 end subroutine get_LM
 
