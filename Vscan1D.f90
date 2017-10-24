@@ -4,6 +4,7 @@
 !               reaction coordinate.                            !
 !   Input :                                                     !
 !           $1 = Gaussian/Qchem output file; initial structure  !
+!           LM                                                  !
 !           $2 = vector (xyz coordinate)                        !
 !           $3 = boundary condition                             !
 !                formate of $3                                  !
@@ -14,8 +15,10 @@
 !                $3=# of interval ; positive integer            !
 !                   interval=1/$3                               !
 !                   i.e. $3=10 ; interval=1/10=0.1 angstrom     !
+!           NM                                                  !
+!           $2 = boundary condition                             !
 !   Output :                                                    !
-!           *.xyz; User define, and it can be used in Jomol.    !
+!           PES.xyz; it can be used in Jmol.                    !
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 ! 2016/04/12, Grace, 1st. ver.
@@ -25,12 +28,11 @@ Program main
     implicit none
     LOGICAL :: RxnCoord
     character(len=100)  :: input
-    integer(4)  :: i,j,k,NAtoms
-    real(8),allocatable,dimension(:,:)  :: Coord,Vec,Delta,Coord_tmp
+    integer(4)  :: i,NAtoms
+    real(8),allocatable,dimension(:,:)  :: Coord,Vec,Delta
     integer(4),dimension(3)  :: BC
     ! The output file of qchem record the atom name as character
     character(len=2),allocatable,dimension(:)   :: AtomName
-    real(8) :: indexR ! in order to print the coordinate
 
 ! Step 0.   Std-out the purpose of this program, and check the
 !           status of input files. 
@@ -44,72 +46,37 @@ Program main
     read(10,*) NAtoms
     read(10,*) input ! this is buffer
     allocate(Coord(NAtoms,3))
-    allocate(Coord_tmp(NAtoms,3))
     allocate(AtomName(NAtoms))
     allocate(Vec(NAtoms,3))
+    allocate(Delta(NAtoms,3))
     call get_coord(NAtoms,Coord,AtomName)
     close(10)
-    stop
-    call GETARG(2,input)
     
-    do i=1,NAtoms
-        read(10,*) Vec(i,1:3)
-    end do
-    close(10)
-    ! The third argument; input file = boundary condition file
+    if (RxnCoord) then
+        ! Normal mode
+        stop ! not yet, 2017/10/24
+    else
+        ! Local mode; full local mode
+        call GETARG(2,input)
+        write(*,'(A)') 'The order of atoms must be the same!'
+        call get_LM(input,NAtoms,Coord,Vec)
+    end if
+    
     call GETARG(3,input)
-    
+    open(10,file=input,status='old',action='read')
     read(10,*) BC(1:3)
     close(10)
+
     ! Calculate the interval vector, delta.
-    allocate(Delta(NAtoms,3))
     do i=1,NAtoms
         Delta(i,1)=Vec(i,1)/BC(3)
         Delta(i,2)=Vec(i,2)/BC(3)
         Delta(i,3)=Vec(i,3)/BC(3)
     end do
+
 ! Step 2. Construct a serious of structures and then write them 
 !         into the pes.txt file
-    open(10,file='pes.txt',status='replace')
-    ! Upper boundary
-    do i=BC(1),1,-1
-        do j=1,NAtoms
-            do k=1,3
-                Coord_tmp(j,k)=Coord(j,k)+i*Delta(j,k)
-            end do
-        end do
-        ! write the structure into file, coord.txt
-        write(10,'(I2)') NAtoms
-        indexR=0.0D0+i*1.0D0/BC(3)
-        write(10,'(F7.4)') indexR
-        do j=1,NAtoms
-            write(10,'(A2,1X,3(F13.10,1X))') AtomName(j),Coord_tmp(j,1:3)
-        end do
-    end do
-    ! Original point
-    write(10,'(I2)') NAtoms
-    write(10,'(A)') '0.0000' ! this is the transition state
-    do i=1,NAtoms
-        write(10,'(A2,1X,3(F13.10,1X))') AtomName(i),Coord(i,1:3)
-    end do
-    ! Lower boundary
-    do i=1,BC(2)
-        do j=1,NAtoms
-            do k=1,3
-                Coord_tmp(j,k)=Coord(j,k)-i*Delta(j,k)
-            end do
-        end do
-        ! write the structure into file, coord.txt
-        write(10,'(I2)') NAtoms
-        indexR=0.0D0-i*1.0D0/BC(3)
-        !  linux bug that it cannot recognize the negative sign
-        write(input,'(F7.4)') indexR
-        write(10,'(A)') 'n'//TRIM(ADJUSTL(input))
-        do j=1,NAtoms
-            write(10,'(A2,1X,3(F13.10,1X))') AtomName(j),Coord_tmp(j,1:3)
-        end do
-    end do
-    close(10)
+    call write_pes(NAtoms,AtomName,Coord,BC,Delta)
 end program main
 
 subroutine print_purpose()
@@ -128,9 +95,8 @@ subroutine print_purpose()
     write(*,'(A)') '   output: NM.dat'
     write(*,'(A)') '           (afford QChem jobs only, 2017/10/23)' 
     write(*,'()')
-    write(*,'(A)') 'Final output: *.xyz'
-    write(*,'(A)') '              (user define the name and it can be'
-    write(*,'(A)') '               visualized by Jmol)'
+    write(*,'(A)') 'Final output: PES.xyz'
+    write(*,'(A)') '              (it can be visualized by Jmol)'
     write(*,'()')
 return
 end subroutine print_purpose
@@ -185,3 +151,81 @@ subroutine get_coord(NAtoms,Coord,AtomName)
 return
 end subroutine get_coord
 
+subroutine get_LM(input,NAtoms,Coord,Vec)
+    implicit none
+    character(len=100),intent(in)  :: input
+    integer(4),intent(in)   :: NAtoms
+    real(8),dimension(NAtoms,3),intent(in) :: Coord
+    real(8),dimension(NAtoms,3),intent(inout)   :: Vec
+    character(len=100)  :: buffer
+    real(8),dimension(NAtoms,3) :: Coord_final
+    integer(4)  :: i,j
+    call SYSTEM('getCoord '//TRIM(input)//' final.xyz')
+    open(10,file='final.xyz',status='old',action='read')
+    read(10,*) buffer
+    read(10,*) buffer
+    do i=1,NAtoms
+        read(10,*) buffer,Coord_final(i,1:3)
+    end do
+    do i = 1,NAtoms
+        do j = 1,3
+            Vec(i,j) = Coord_final(i,j) - Coord(i,j)
+        end do
+    end do
+    close(10,status='delete')
+return
+end subroutine get_LM
+
+subroutine write_pes(NAtoms,AtomName,Coord,BC,Delta)
+    implicit none
+    integer(4),intent(in)   :: NAtoms
+    character(len=2),intent(inout),dimension(NAtoms)  :: AtomName
+    real(8),dimension(NAtoms,3),intent(in)  :: Coord,Delta
+    integer(4),dimension(3),intent(in)  :: BC
+    integer(4)  :: i,j,k
+    real(8),dimension(NAtoms,3) :: Coord_tmp
+    real(8) :: indexR ! in order to print the coordinate
+    character(len=100)  :: buffer
+
+    open(10,file='PES.xyz',status='replace')
+    ! Upper boundary
+    do i=BC(1),1,-1
+        do j=1,NAtoms
+            do k=1,3
+                Coord_tmp(j,k)=Coord(j,k)+i*Delta(j,k)
+            end do
+        end do
+        ! write the structure into file, coord.txt
+        write(10,'(I2)') NAtoms
+        indexR=0.0D0+i*1.0D0/BC(3)
+        write(10,'(F7.4)') indexR
+        do j=1,NAtoms
+            write(10,'(A2,1X,3(F13.10,1X))') AtomName(j),Coord_tmp(j,1:3)
+        end do
+    end do
+    ! Original point
+    write(10,'(I2)') NAtoms
+    write(10,'(A)') '0.0000' 
+    do i=1,NAtoms
+        write(10,'(A2,1X,3(F13.10,1X))') AtomName(i),Coord(i,1:3)
+    end do
+    ! Lower boundary
+    do i=1,BC(2)
+        do j=1,NAtoms
+            do k=1,3
+                Coord_tmp(j,k)=Coord(j,k)-i*Delta(j,k)
+            end do
+        end do
+        ! write the structure into file, coord.txt
+        write(10,'(I2)') NAtoms
+        indexR=0.0D0-i*1.0D0/BC(3)
+        !  linux bug that it cannot recognize the negative sign
+        write(buffer,'(F7.4)') indexR
+        write(10,'(A)') 'n'//TRIM(ADJUSTL(buffer))
+        do j=1,NAtoms
+            write(10,'(A2,1X,3(F13.10,1X))') AtomName(j),Coord_tmp(j,1:3)
+        end do
+    end do
+    close(10)
+return
+end subroutine write_pes
