@@ -1,7 +1,7 @@
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !   Program :                                                   !
 !               Produce a serious of structure along a selected !
-!               coordinate.                                     !
+!               reaction coordinate.                            !
 !   Input :                                                     !
 !           $1 = Gaussian/Qchem output file; initial structure  !
 !           $2 = vector (xyz coordinate)                        !
@@ -23,8 +23,8 @@
 
 Program main
     implicit none
+    LOGICAL :: RxnCoord
     character(len=100)  :: input
-    logical :: filestat
     integer(4)  :: i,j,k,NAtoms
     real(8),allocatable,dimension(:,:)  :: Coord,Vec,Delta,Coord_tmp
     integer(4),dimension(3)  :: BC
@@ -33,40 +33,25 @@ Program main
     real(8) :: indexR ! in order to print the coordinate
 
 ! Step 0.   Std-out the purpose of this program, and check the
-!           status of input file. 
+!           status of input files. 
     call print_purpose()
+    call get_RxnCoord(RxnCoord)
+    
 ! Step 1. Extract the coordinate and boundary from input file
-   ! The first argument; input file = coordinate
     call GETARG(1,input)
-    INQUIRE(file=input,exist=filestat)
-    if (filestat) then
-        open(10,file=input,status='old',action='read')
-    else
-        write(*,'(A)') TRIM(input)//" doesn't exist"
-        stop
-    end if
-    i=0
-    do while ( .not. eof(10) )
-        read(10,'(A)') input ! it is a buffer
-        i=i+1
-    end do
-    rewind(10)
-    NAtoms=i
+    call SYSTEM('getCoord '//TRIM(input)//' initial.xyz')
+    open(10,file='initial.xyz',status='old',action='read')
+    read(10,*) NAtoms
+    read(10,*) input ! this is buffer
     allocate(Coord(NAtoms,3))
     allocate(Coord_tmp(NAtoms,3))
     allocate(AtomName(NAtoms))
+    allocate(Vec(NAtoms,3))
     call get_coord(NAtoms,Coord,AtomName)
     close(10)
-    ! The second argment; input file = vector
+    stop
     call GETARG(2,input)
-    INQUIRE(file=input,exist=filestat)
-    if (filestat) then
-        open(10,file=input,status='old',action='read')
-    else
-        write(*,'(A)') TRIM(input)//" doesn't exist"
-        stop
-    end if
-    allocate(Vec(NAtoms,3))
+    
     do i=1,NAtoms
         read(10,*) Vec(i,1:3)
     end do
@@ -155,6 +140,43 @@ subroutine print_purpose()
     write(*,'()')
 return
 end subroutine print_purpose
+
+subroutine get_RxnCoord(RxnCoord)
+    implicit none
+    LOGICAL,intent(out) :: RxnCoord
+    integer(4)  :: i,num
+    num = IARGC() 
+    if ( num .eq. 2) then
+        ! Normal mode
+        RxnCoord = .true.
+    else if (num .eq. 3) then
+        ! Local mode       
+        RxnCoord = .false.
+    else
+        write(*,'(A)') 'Wrong amount of input arguments, stop!'
+        STOP
+    end if
+    do i = 1,num ! check the input file status
+        call check_file(i)
+    end do
+return
+end subroutine get_RxnCoord
+
+subroutine check_file(num)
+    implicit none
+    integer(4),intent(in)   :: num
+    character(len=100)  :: input
+    LOGICAL     :: filestat
+    call GETARG(num,input)
+    INQUIRE(file=input,exist=filestat)
+    if (filestat) then
+        open(10,file=input,status='old',action='read')
+    else
+        write(*,'(A)') TRIM(input)//" doesn't exist"
+        stop
+    end if
+return
+end subroutine check_file
 
 subroutine get_coord(NAtoms,Coord,AtomName)
     implicit none
