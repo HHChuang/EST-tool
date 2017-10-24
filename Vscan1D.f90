@@ -58,13 +58,7 @@ Program main
     close(10)
     ! The third argument; input file = boundary condition file
     call GETARG(3,input)
-    INQUIRE(file=input,exist=filestat)
-    if (filestat) then
-        open(10,file=input,status='old',action='read')
-    else
-        write(*,'(A)') TRIM(input)//" doesn't exist"
-        stop
-    end if
+    
     read(10,*) BC(1:3)
     close(10)
     ! Calculate the interval vector, delta.
