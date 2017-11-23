@@ -263,6 +263,6 @@ subroutine write_pes(NAtoms,AtomName,Coord,BC,Delta)
             write(10,'(A2,1X,3(F13.10,1X))') AtomName(j),Coord_tmp(j,1:3)
         end do
     end do
-    close(10)
+    close(10) !test
 return
 end subroutine write_pes
