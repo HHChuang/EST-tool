@@ -217,6 +217,7 @@ SP=$(grep -c SP class.txt)
 MIN=$(grep -c MIN class.txt)
 Saddle=$(grep -c Saddle class.txt)
 IRC=$(grep -c IRC class.txt)
+grep Fail statistic.txt | sed 's/Fail//g' > Fail.txt
 
 # Step 3. Std-out the information, and then delete the temporary files. 
 echo 'Std-out the information of rawdata'
@@ -225,7 +226,10 @@ echo "Count the amount of jobs:"
 printf '%8s\t %5i\t \n' $(echo Total: $Total)
 printf '%8s\t %5i\t \n' $(echo Success: $Success)
 printf '%8s\t %5i\t \n' $(echo Fail: $Fail)  
-echo ""
+echo "" 
+echo '----------------------------------------'
+printf 'Fail jobs are listed in file Fail.txt \n'
+echo '----------------------------------------'
 
 if [ -f class.txt ]
 then
