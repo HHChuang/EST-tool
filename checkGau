@@ -28,6 +28,7 @@ echo ""
 echo 'No argument, please key-in "all" or the name of G09 output file (*.log)' \
 && exit
 
+
 # Step 2. Depend on the selected version, extract the raw data
 
 # set the function ##########################################################
