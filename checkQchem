@@ -1,0 +1,270 @@
+#!/bin/bash
+#############################################################################
+#	Program : 																#
+#			Check the status of Qchem output file.							#
+#			- classification has SP, MIN, Saddle and IRC					#
+#			- it has single job version and benchmark version				#
+#			- history: merge the function of checkQchemOPT and checkQchemPES#
+#			  and getQchemE and getQchemPES_S0								#		
+#																			#
+#	Input : 																#
+#			single job verion : $1 = test.out 								#
+#			benchmark version : $1 = all									#
+#	Output : 																#
+#			Std-out															#
+#############################################################################
+
+# 2016/11/04, Grace, 1st. ver.
+
+# Step 1. Check the status of input argument and std-out the purpose 
+echo ""
+echo "Program $0 will check and alanyse Qchem output files "
+echo "working directory: $(pwd) "
+echo ""
+echo "The extension of output file is : .out"
+echo "If this is a conjugate jobs in one file,"
+echo "it will analyse the last one."
+echo ""
+
+[ "$1" == "" ] && \
+echo 'No argument, please key-in "all" or the name of Qchem output file (*.out)' \
+&& exit
+
+# Step 2. Depend on the selected version, extract the raw data
+
+# set the function ##########################################################
+	# extract the last one file #############################################
+	rm -f *.tmp.*
+	function lastOne(){
+		# input : test.out;; Qchem output file
+		# output : tmp.out
+		first=$(grep -n Welcome $1 | tail -n 1 | cut -d ':' -f 1)
+		last=$(wc -l $1 | awk '{print $1}')
+		sed -n "$first, $last p" $1 > tmp.out	
+	}
+	# count and list the imaginary frequency ################################
+	function countIF(){
+		# input : test.out; Qchem output file
+		# output : IF.txt
+
+		# extract all frequency
+		grep -w 'Frequency:' $1|awk '{print $2,$3,$4}' > FreqList
+        awk '{print $1}' FreqList > FreqListColumn
+        awk '{print $2}' FreqList >> FreqListColumn
+        awk '{print $3}' FreqList >> FreqListColumn
+		# count the amount of IF
+        NumIF=$(grep 'This Molecule has' $1 | grep 'Imaginary Frequencies' \
+				| tail -n 1 | awk '{print $4}')
+		if [ "$NumIF" == "" ]
+		then
+			# SP or MIN
+			echo 0 > tmp0.txt
+			touch tmp1.txt
+		else
+			# Saddle, extract the IF
+			echo $NumIF > tmp0.txt
+			grep '-' FreqListColumn > tmp1.txt
+		fi
+		paste tmp0.txt tmp1.txt > IF.txt
+		rm -f FreqList FreqListColumn tmp0.txt tmp1.txt
+	}
+	# extract the energy ####################################################
+	function extractE(){
+		# input : test.out; Qchem output file
+        # output : E.txt
+
+		E=$(grep 'Total energy in the final basis set' $1 | tail -n 1 \
+			| awk '{print $9}')
+		echo $E  >> E.txt
+	}
+	# extract the zero point energy  ########################################
+    function extractZPE(){
+        # input : test.out; Qchem output file
+        # output : ZPE.txt
+
+        ZPE=$(grep 'Zero point vibrational energy:' $1 | tail -n 1 \
+            | awk '{print $5}')
+        echo $ZPE >> ZPE.txt
+	}
+	# extract the IRC information ###########################################
+	function IRC(){
+		# input : test.out; Qchem output file
+        # output : irc.txt
+		
+		grep -A 1 'Reaction path following' $1 | grep Step > tmp.irc.txt
+		tmp=$(grep -n ' 1 E' tmp.irc.txt  | tail -n 1 | cut -d ':' -f 1)
+		pts_R=$(($tmp-1))
+		pts_P=$(tail -n 1 tmp.irc.txt | awk '{print $2}')
+		pts=$(($pts_R+$pts_P))
+		TS=$(grep ' 1 E' tmp.irc.txt | tail -n 1 | awk '{print $4}')
+		R=$(head -n $pts_R tmp.irc.txt | tail -n 1 | awk '{print $4}')
+		P=$(tail -n 1 tmp.irc.txt | awk '{print $4}')
+		echo $pts $R $TS $P > irc.txt
+		rm -f tmp.irc.txt
+	}
+# major part ################################################################
+
+# Creat the list which records all Qchem output file ########################
+case $1 in 
+	"all") # benchmark mode
+        ls | grep .out | sed 's/.out//g' > list.txt
+        NumJobs=$(wc -l list.txt | awk '{print $1}')
+		for (( i=1; i<= $NumJobs; i++))
+		do
+			name=$(head -n $i list.txt | tail -n 1)
+			lastOne $name.out
+			mv tmp.out $name.tmp.out
+		done
+	;;
+	*) # single job mode
+		echo  $1 | sed 's/.out//g' > list.txt
+		NumJobs=$(echo 1)
+		lastOne $1
+		name=$(cat list.txt)
+		mv tmp.out $name.tmp.out
+	;;
+esac
+
+# check the job is sucess of fail ###########################################
+# input : list.txt $NumJobs
+# output : statistic.txt
+rm -f statistic.txt 
+for (( i=1; i<=$NumJobs; i++ ))
+do
+	name=$(head -n $i list.txt | tail -n 1 )
+	# check the existence of argument
+    test -e $name.out || echo "file $name.out is not exist" | exit
+	End=$(grep -c 'Thank you very much for using Q-Chem' $name.tmp.out)
+    if [ "$End" == "0" ]
+    then
+    	# Error termination
+        stat=$(echo Fail) 
+    else
+        # Normal termination
+        stat=$(echo Success)
+	fi
+	echo $name $stat >> statistic.txt
+done
+rm -f list.txt
+
+# 1. check the status of jobs: SP, MIN, Saddle or IRC #########################
+# 2. alalyse the result of jobs, call function: countIF, EandZPE and IRC ######
+# input : statistic.txt
+# output : class.txt (SP.txt,MIN.txt,Saddle.txt,IRC.txt)
+rm -f class.txt SP.txt MIN.txt Saddle.txt IRC.txt IF.txt EandZPE.txt
+grep Success statistic.txt > list.txt
+NumJobs=$(grep -c Success statistic.txt)
+for (( k=1; k<=$NumJobs; k++ ))
+do 
+	name=$(head -n $k list.txt | tail -n 1  | awk '{print $1}')
+	echo $name > name.txt
+    # check it is IRC or  not
+    IRC=$(grep -c 'Reaction path following' $name.tmp.out)
+    if [ "$IRC" == "0" ]
+    then
+        # check it is Saddle or MIN or SP
+        countIF $name.tmp.out
+        # extract the energy
+        extractE $name.tmp.out
+        NumIF=$(head -n 1 IF.txt | awk '{print $1}')
+		# IF is not exist
+        if [ "$NumIF" == "0" ]
+        then
+          	SP=$(grep 'Frequencies' $name.tmp.out)
+            if [ "$SP" == "" ]
+            then
+                status=$(echo SP) 
+                paste name.txt E.txt >> SP.txt
+            else
+				extractZPE $name.tmp.out
+                status=$(echo MIN)
+                paste name.txt E.txt ZPE.txt >> MIN.txt
+            fi
+            # IF is exist
+        else
+			extractZPE $name.tmp.out
+            status=$(echo Saddle)
+            paste name.txt E.txt ZPE.txt IF.txt >> Saddle.txt
+        fi
+    else
+        # this is IRC result
+        status=$(echo IRC)
+        IRC $name.tmp.out
+        paste name.txt irc.txt >> IRC.txt
+    fi
+	echo $name $status >> class.txt
+    rm -f name.txt status.txt irc.txt IF.txt E.txt ZPE.txt 
+	rm -f $name.tmp.out
+done
+rm -f list.txt
+
+# analyse the amount of jobs ###################################################
+Total=$(wc -l statistic.txt|awk '{print $1}')
+Success=$(grep -c Success statistic.txt)
+Fail=$(grep -c Fail statistic.txt)
+if [ -f class.txt ]
+then
+	SP=$(grep -c SP class.txt)
+	MIN=$(grep -c MIN class.txt)
+	Saddle=$(grep -c Saddle class.txt)
+	IRC=$(grep -c IRC class.txt)
+fi
+
+# Step 3. Std-out the information, and then delete the temporary files. 
+echo 'Std-out the information of rawdata'
+echo ""
+echo "Count the amount of jobs:"
+printf '%8s\t %5i\t \n' $(echo Total: $Total)
+printf '%8s\t %5i\t \n' $(echo Success: $Success)
+printf '%8s\t %5i\t \n' $(echo Fail: $Fail)  
+echo ""
+
+if [ -f class.txt ]
+then
+	echo "Classification of the successful jobs:"
+	printf '%8s\t %5i\t \n' $(echo SP: $SP)
+	printf '%8s\t %5i\t \n' $(echo MIN: $MIN)
+	printf '%8s\t %5i\t \n' $(echo Saddle: $Saddle)
+	printf '%8s\t %5i\t \n' $(echo IRC: $IRC)
+	echo ""
+	echo "Detail of output: "
+	
+	if [ -f SP.txt ]
+	then
+		echo ""
+		echo '----- SP -----'
+		printf '%10s\t %16s\t  \n' $(echo Name E\(hartree\))
+    	printf '%10s\t %16.10f\t \n' $(cat SP.txt)
+	fi
+	
+	if [ -f MIN.txt ]
+	then
+		echo ""
+		echo '----- MIN -----'
+		printf '%10s\t %16s\t %16s\t \n' $(echo Name E\(hartree\) ZPE\(kcal/mol\))
+	    printf '%10s\t %16.10f\t %16.10f\t \n' $(cat MIN.txt)
+	fi
+	
+	if [ -f Saddle.txt ]
+	then
+		echo ""
+		echo '----- Saddle -----'
+		
+		printf '%10s\t %16s\t %16s\t %3s\t %10s\t \n' \
+	    $(echo Name E\(hartree\) ZPE\(kcal/mol\) \#IF IF\(cm^1\))
+    	#printf '%10s\t %16.10f\t %16.10f\t %2i\t %10.4f\n' $(cat Saddle.txt)	
+		cat Saddle.txt
+	fi
+
+	if [ -f IRC.txt ]
+	then
+		echo ""
+		echo '----- IRC -----'
+		printf '%10s\t %4s\t %16s\t %16s\t %16s\t \n' \
+    	$(echo Name \#IRC R\(hartree\) TS\(hartree\) P\(hartree\))
+    	printf '%10s\t %4i\t %16.10f\t %16.10f\t %16.10f\n' \
+	    $(cat IRC.txt)
+	fi
+	
+	rm -f statistic.txt class.txt SP.txt MIN.txt Saddle.txt IRC.txt
+fi
