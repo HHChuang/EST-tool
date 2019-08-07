@@ -1,6 +1,6 @@
 #!/bin/bash
 #############################################################################
-#	Program : 																#
+#	Program :                                                               #
 #			Check the status of G09 output file.							#
 #			- classification has SP, MIN, Saddle and IRC					#
 #			- it has single job version and benchmark version				#
