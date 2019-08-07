@@ -1,0 +1,68 @@
+#!/bin/bash
+#############################################################################
+#	Program : Create a serious of vectors									#
+#																			#
+#	Input :																	#
+#			$1 = *.xyz ; a serious of structure								#
+#			format															#
+#				number of atome												#
+#				name of structure											#
+#				name of atom (integer or char.) xyz coordinate				#
+#	Output : 																#
+#			*.vec.txt ; a serious of vector									#
+#			format															#
+#				number of atom 												#
+#				name of vector												#
+#				xyz vector													#
+#																			#
+#	Note :																	#
+#			the amount of vector is less than 1 by compare to the amount of #
+#			structure														#
+#############################################################################
+
+# 2016/11/14, Grace, 1st. ver.
+# 2019/06/10, Grace, add the amount of digit =10 
+
+# Step 1. Std-out instruction and check the status of input argument
+	test -f $1 || echo $1 is not exist
+	[ "$1" == "" ] \
+	&& echo "No input argument, please key-in the name of file (.xyz)." \
+	&& exit
+	echo ''
+	echo "--- Program $0 calculate the displacement difference, vector,"
+	echo "--- between two structures, and then create a serious of vector"
+	echo "--- from file $1"
+	name=$(echo $1 | sed 's/.xyz//')
+	echo ''
+	echo "Output data: $name.vec.txt"
+	echo ''
+# Step 2. Calculate a serious of vector
+	NAtoms=$(head -n 1 $1)
+	totline=$(wc -l $1| awk '{print $1}')
+	Nfiles=$(($totline/($NAtoms+2)))
+
+	rm -f $name.vec.txt
+	for (( i=1; i<=$((Nfiles-1)); i++ ))
+	do
+		head -n $(( $i*($NAtoms+2) )) $1 | tail -n $NAtoms \
+			| awk '{print $2,$3,$4}' > struc0.txt
+		head -n $(( ($i+1)*($NAtoms+2) )) $1 | tail -n $NAtoms \
+			| awk '{print $2,$3,$4}' > struc1.txt
+		echo $NAtoms >> $name.vec.txt
+		echo $i >> $name.vec.txt
+		# assign the element of arrays
+		for (( j=1; j<=$NAtoms; j++ ))
+		do
+			struc0=($(head -n $j struc0.txt | tail -n 1))
+			struc1=($(head -n $j struc1.txt | tail -n 1))
+			for (( k=0; k<=2;k++ ))
+			do
+				vec[$k]=$(echo "scale=10; ${struc1[$k]} - ${struc0[$k]} "|bc)
+			#	echo ${struc1[$k]} ${struc0[$k]} ${vec[@]}
+			done
+			# echo $k ${vec[@]}
+			echo ${vec[@]} >> $name.vec.txt	
+		done
+	done
+
+	rm -f struc0.txt struc1.txt 

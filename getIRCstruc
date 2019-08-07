@@ -1,0 +1,83 @@
+#!/bin/bash
+#########################################################################
+#	Program : Extract a serious of structures form G09 IRC output file	#
+#																		#
+#	Input : 															#
+#			$1 = *.log													#
+#	Output :															#
+#			$2 = user defined											#
+#			format														#
+#					number of atoms										#
+#					index of coordinate									# 
+#					name of atom (integer), xyz coordinate 				#
+#########################################################################
+
+# 2016/11/13, Grace, 1st. ver.
+# 2017/05/22, Grace, 2nd. ver. change coord. into mass-weighted
+# 2017/07/02, Grace, 3rd. ver. debug 
+
+################################################################################
+# Step 0. Std-out instruction and check the status of input argument
+test -f $1 || echo $1 is not exist
+[ "$1" == "" ] \
+&& echo "No input argument, please key-in the name of G09 file (e.g. *.log)" \
+&& exit
+[ "$2" == "" ] \
+&& echo "No input argument, please assign the filename of output (e.g. *.xyz)" \
+&& exit
+echo ''
+echo "--- Program $0 extracts all structures of"
+echo "--- G09 file $1 along IRC result"
+#name=$(echo $1 | sed 's/.log//')
+echo ''
+echo "Output data: $2"
+echo ''
+
+# Three IRC situations
+    # 1. Forward and Reverse
+    # 2. Forward only
+    # 3. Reverse only
+
+#################################################################################
+
+# variable
+NAtoms=$(grep NAtoms $1 | grep -v MOERIx | tail -n 1 | awk '{print $2}')
+TotalPoint=$(grep -c 'NET REACTION COORDINATE UP TO THIS POINT' $1 )	
+echo "Total amount of points (include TS) is : " $(($TotalPoint+1))
+echo ''
+# function
+function Tmp_ini() {
+# $1 = input file
+# $2 = index of step
+tmp_ini=$(grep -n 'Point Number:' $1 | awk '{print $1}' \
+			| sed 's/://g' | sed -n "$2,$2 p")
+}
+function Tmp_fin() {
+# $1 = input file
+# $2 = index of step
+tmp_fin=$(grep -n 'NET REACTION COORDINATE UP TO THIS POINT' $1 | awk '{print $1}' \
+			| sed 's/://g' | sed -n "$2,$2 p")
+}
+function Coord() {
+coord=$(grep 'NET REACTION COORDINATE UP TO THIS POINT' $1 | awk '{print $9}' \
+            | sed -n "$2,$2 p")
+}
+
+# main program
+# extract TS (input orientation)
+echo $NAtoms > $2
+echo 0.0000 >> $2
+grep -A $((2+$NAtoms)) 'Coordinates (Angstroms)' $1 | head -n $((3+$NAtoms)) \
+| tail -n $NAtoms | awk '{print $2,$4,$5,$6}' >> $2
+# extract IRC struc
+for ((i=1;i<=$TotalPoint;i++))
+do
+	Tmp_ini $1 $i
+	Tmp_fin $1 $i
+	Coord $1 $i
+
+	echo $NAtoms >> $2
+    echo $coord >> $2
+	sed -n "$tmp_ini , $tmp_fin p" $1 | grep -A $((2+$NAtoms)) 'Center     Atomic      Atomic             Coordinates (Angstroms)' \
+	| tail -n $NAtoms | awk '{print $2,$4,$5,$6}' >> $2
+done

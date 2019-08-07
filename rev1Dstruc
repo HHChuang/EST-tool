@@ -1,0 +1,55 @@
+#!/bin/bash
+#########################################################################
+#	Program : Reverse the order of IRC (reverse mode), and add negative #
+#			  sign at the index of coordinate							#
+#																		#
+#	Input : 															#
+#			$1 = user defined											#
+#	Output :															#
+#			$2 = user defined											#
+#			format														#
+#					number of atoms										#
+#					index of coordinate									# 
+#					name of atom (integer), xyz coordinate 				#
+#########################################################################
+
+# 2017/07/02, Grace, 1st. ver.
+
+################################################################################
+# Step 0. Std-out instruction and check the status of input argument
+test -f $1 || echo $1 is not exist
+[ "$1" == "" ] \
+&& echo "No input argument, please key-in the filename of output (e.g. *.xyz)" \
+&& exit
+[ "$2" == "" ] \
+&& echo "No input argument, please assign the filename of output (e.g. *.xyz)" \
+&& exit
+echo ''
+echo "--- Program $0 reverse the order of $1,"
+echo "--- and add 'n' in the begining of index."
+#name=$(echo $1 | sed 's/.log//')
+echo ''
+echo "Output data: $2"
+echo ''
+
+# Three IRC situations
+    # 1. Forward and Reverse
+    # 2. Forward only
+    # 3. Reverse only
+
+#################################################################################
+
+# variable
+NAtoms=$(head -n 1 $1)
+totalline=$(wc -l $1 | awk '{print $1}')
+TotalPoint=$(( $totalline/($NAtoms+2) ))	
+rm -f $2
+for ((i=1;i<=$TotalPoint;i++))
+do
+tail -n $(( ($NAtoms+2)*$i )) $1 | head -n $(($NAtoms+2)) > tmp.txt
+coord=$(sed -n '2,2 p' tmp.txt)
+echo $NAtoms >> $2
+echo n$coord >> $2
+tail -n $NAtoms tmp.txt >> $2
+done
+rm -f tmp.txt
