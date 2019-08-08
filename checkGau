@@ -5,7 +5,7 @@
 #       - classification has SP, MIN, Saddle and IRC                        #
 #       - it has single job version and benchmark version                   #
 #       - history: merge the function of checkGauOPT and checkGauPES 	    #
-#       and getGauEandZPE												    #		
+#         and getGauEandZPE                                                 #		
 #                                                                           #
 #   Input :                                                                 #
 #       single job verion : $1 = test.log                                   #
