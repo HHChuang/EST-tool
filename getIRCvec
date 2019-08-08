@@ -2,8 +2,8 @@
 #############################################################################
 #   Program : Create a serious of vectors                                   #
 #                                                                           #
-#	Input :																	#
-#			$1 = *.xyz ; a serious of structure								#
+#	Input :                                                                 #
+#           $1 = *.xyz ; a serious of structure                             #
 #			format															#
 #				number of atome												#
 #				name of structure											#
