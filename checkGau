@@ -1,18 +1,18 @@
 #!/bin/bash
 #############################################################################
-#	Program :                                                               #
-#			Check the status of G09 output file.							#
-#			- classification has SP, MIN, Saddle and IRC					#
-#			- it has single job version and benchmark version				#
-#			- history: merge the function of checkGauOPT and checkGauPES 	#
-#			  and getGauEandZPE												#		
-#																			#
-#	Input : 																#
-#			single job verion : $1 = test.log 								#
-#			benchmark version : $1 = all									#
+#   Program :                                                               #
+#       Check the status of G09 output file.                                #
+#       - classification has SP, MIN, Saddle and IRC                        #
+#       - it has single job version and benchmark version                   #
+#       - history: merge the function of checkGauOPT and checkGauPES 	    #
+#       and getGauEandZPE												    #		
 #                                                                           #
-#	Output : 																#
-#			Std-out															#
+#   Input :                                                                 #
+#       single job verion : $1 = test.log                                   #
+#       benchmark version : $1 = all                                        #
+#                                                                           #
+#   Output :                                                                #
+#       Std-out                                                             #
 #                                                                           #
 #   History :                                                               #
 # 2016/11/03, Grace, 1st. ver.                                              #
