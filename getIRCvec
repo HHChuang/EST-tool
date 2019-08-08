@@ -3,21 +3,21 @@
 #   Program : Create a serious of vectors                                   #
 #                                                                           #
 #   Input :                                                                 #
-#           $1 = *.xyz ; a serious of structure                             #
-#			format															#
-#				number of atome												#
-#				name of structure											#
-#				name of atom (integer or char.) xyz coordinate				#
-#	Output : 																#
-#			*.vec.txt ; a serious of vector									#
-#			format															#
-#				number of atom 												#
-#				name of vector												#
-#				xyz vector													#
-#																			#
-#	Note :																	#
-#			the amount of vector is less than 1 by compare to the amount of #
-#			structure														#
+#       $1 = *.xyz ; a serious of structure                                 #
+#       format                                                              #
+#       number of atome                                                     #
+#       name of structure                                                   #
+#       name of atom (integer or char.) xyz coordinate                      #
+#   Output :                                                                #
+#       *.vec.txt ; a serious of vector                                     #
+#       format                                                              #
+#       number of atom                                                      #
+#       name of vector                                                      #
+#       xyz vector                                                          #
+#                                                                           #
+#	Note :                                                                  #
+#   the amount of vector is less than 1 by compare to the amount of         #
+#   structure                                                               #
 #############################################################################
 
 # 2016/11/14, Grace, 1st. ver.
