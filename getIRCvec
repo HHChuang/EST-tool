@@ -2,7 +2,7 @@
 #############################################################################
 #   Program : Create a serious of vectors                                   #
 #                                                                           #
-#	Input :                                                                 #
+#   Input :                                                                 #
 #           $1 = *.xyz ; a serious of structure                             #
 #			format															#
 #				number of atome												#
