@@ -1,8 +1,8 @@
 # Overview
-   **Purpose:** 
+   **Purpose: ** 
    Tools for electronic structure theory (EST) calculation (e.g. Gaussian, QChem). 
    
-   **What I learn**
+   **What I learn: **
    'We make a living by what we get, but we make a life by what we give.- Winston Churchill'
    
 
