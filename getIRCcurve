@@ -1,0 +1,29 @@
+#!/bin/bash
+#########################################################################
+# 2016/12/29, Grace, 1st. ver.                                          #
+# 2017/05/21, Grace, 2nd. ver.                                          #
+# $1 = IRC output                                                       #
+# $2 = IRC result                                                       #
+#########################################################################
+
+echo 'Plot IRC curve'
+echo '$1 = IRC output'
+echo '$2 = IRC result'
+echo 'formate : x = mass-weighted coord, y = hartree'
+
+rm -f *.tmp
+TS=$(grep 'Energies reported relative to the TS energy of' $1\
+| awk '{print $9}')
+npts=$(grep 'Total number of points:' $1| awk '{print $5}')
+grep -A $(($npts+3)) 'Summary of reaction path following' $1\
+| tail -n $(($npts+1)) |awk '{print $3}' > x.tmp
+grep -A $(($npts+3)) 'Summary of reaction path following' $1\
+| tail -n $(($npts+1)) |awk '{print $2}' > y.tmp
+for energy in `cat y.tmp`
+do
+echo "( $energy + $TS ) " | bc >> energy.tmp
+done
+
+paste x.tmp energy.tmp > $2
+
+rm -f *.tmp

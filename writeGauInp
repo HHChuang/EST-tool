@@ -1,0 +1,36 @@
+#!/bin/bash
+#####################################################################
+#   Program :                                                       #
+#           Extract the coordinate and then write the input file    #
+#           for Gaussian program                                    #
+#   Input   :                                                       #
+#           $1 = header.txt ; record the route section              #
+#           *.log                                                   #
+#   Output  :                                                       #
+#           *.com                                                   #
+#####################################################################
+
+#2015/11/30, Grace, 1st. ver.
+#2016/11/11, Grace, 2nd. ver. change the extension 
+
+# Step 1. Check the input argument
+test -f $1 || echo $1 is not exist
+test -f $1 || exit
+# Step 2. Creat the list 
+nfile=$(ls | grep -c .out )
+ls | grep .out > list.txt
+# Step 3. Extract the partial optimized coordinate and write the input
+testfile=$(ls | grep .log| head -n 1)
+NAtoms=$(grep NAtoms $testfile| head -n 1| awk '{print $2}')
+for ((i=1; i<=$nfile; i=i+1))
+do 
+name=$(head -n $i list.txt | tail -n 1)
+inp=$(echo $name | sed 's/.log/.com/g')
+grep -A $(($NAtoms+4)) orientation $name | tail -n $NAtoms \
+| awk '{print $2,$4,$5,$6}' > coord.txt
+cat $1 > $inp
+cat coord.txt >> $inp
+echo ' ' >> $inp
+done
+
+rm -f list.txt coord.txt

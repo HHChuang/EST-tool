@@ -1,14 +1,14 @@
 #!/bin/bash
-#####################################################################
-#Program :						      						  		#
+#########################################################################
+#Program :						      		#
 #	Extract the optimized coordinate from a Gaussian/QChem      	#
-#	output file.					      					  		#
-#Input: 					    	       					  		#	
-#	$1=test; Gaussian/QChem output file                     	    #
-#Output: 						      						  		#
-#	1. Std out						      						  	#
-#	2. *.xyz; user defined (can be used in Jmol)					#
-#####################################################################
+#	output file.					      		#
+#Input: 					    	       		#	
+#	$1=test; Gaussian/QChem output file                     	#
+#Output: 						      		#
+#	1. Std out						      	#
+#	2. *.xyz; user defined (can be used in Jmol)			#
+#########################################################################
 
 # 2012/04/22, Grace, 1st. ver.
 # 2016/10/24, Grace, 2nd. ver.
