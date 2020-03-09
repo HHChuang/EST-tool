@@ -2,6 +2,12 @@
    **Purpose:** 
    Tools for electronic structure theory (EST) calculation (e.g. Gaussian, QChem). 
    
+<<<<<<< HEAD
+=======
+   **What I learn:**
+   'We make a living by what we get, but we make a life by what we give.- Winston Churchill'
+   
+>>>>>>> origin
 
 ## 1. Programming Language : 
 - Bash shell script
@@ -121,4 +127,8 @@
 ---
 ## History:
 - 2015/10/13, Grace, 1st. ver.			
+<<<<<<< HEAD
 - 2016/11/04, Grace, 2nd. ver.									
+=======
+- 2016/11/04, Grace, 2nd. ver.									
+>>>>>>> origin
