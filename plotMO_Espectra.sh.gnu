@@ -19,22 +19,22 @@
 #########################################################################
 
 # global variables
-# Ewindow=() # plot all MOs TODO: make a switch in plotMO()
-Ewindow=(-0.6 0.4) # select part of MOs
+Xwindow=(-2.5 2.5)
+Ewindow=(-0.6 0.4) # select part of MOs, depends on system
 totMO=$(grep -A 1 num $1 | tail -n 1 | awk '{print $1}')
 
 function main {
     assignMO $1 coord.dat # output: coord.dat, format: $num $x $y
     assignHOMO $1  # output variable: $HOMO
     HOMO=$(echo $?)
-    plotMO coord.dat $HOMO # output: 
+    plotMO coord.dat $HOMO # output: Espectra.eps, MO.eps
 }
 
 function assignMO {
     #   $1 = MO energy 
     #   $2 = coord.dat, name of output file
 
-    x=(-1 0 1)
+    x=(-1.2 0 1.2)
     xnew=()
     y=( $(grep -A $totMO Energy $1 | tail -n $totMO | awk '{print $3}'| sort -n) )
     highestMO=$(($totMO-1))
@@ -99,8 +99,24 @@ function plotMO {
         MOx[$i]=$( echo ${x[$i]} + 0.3 | bc )
     done
     HOMOcoord=$( echo ${y[$(( $2 -1 )) ]} - 0.03 | bc)
+    
+    # orbital in selected energy range 
+    for ((i=0;i<=$(($totMO-1));i++))
+    do 
+        if (( $(echo "${y[$i]} > ${Ewindow[0]}" | bc -l) )); then 
+            figMIN=$i
+            break
+        fi 
+    done
+    for ((i=$figMIN;i<=$(($totMO-1));i++))
+    do 
+        if (( $(echo "${y[$i]} > ${Ewindow[1]}" | bc -l) )); then 
+            figMAX=$(($i-1))
+            break
+        fi 
+    done
 
-# trail for the 1st. output
+# plot all MO energy spectra
 gnuplot << EOF
     # import array from bash to gnuplot
     xLcoord="${xleft[*]}"
@@ -129,7 +145,7 @@ gnuplot << EOF
     p 'coord.dat' u 2:3
 
 EOF
-
+# select important MO and plot their energy with MO figures
 gnuplot << EOF
     # import array from bash to gnuplot
     xLcoord="${xleft[*]}"
@@ -139,6 +155,7 @@ gnuplot << EOF
     MOxcoord="${MOx[*]}"
     num="${num[*]}"
     Ewindow="${Ewindow[*]}"
+    Xwindow="${Xwindow[*]}"
 
     # Environment setting
     set term postscript eps enhanced color \
@@ -146,12 +163,12 @@ gnuplot << EOF
     set output "MO.eps"
     unset key
     set multiplot
-    set xrange [-2.5:2.5]
+    set xrange [word(Xwindow,1):word(Xwindow,2)]
     set yrange [word(Ewindow,1):word(Ewindow,2)]
 
     # Energy spectra; set MO energy bars and their numbering
     set size ratio 1.5
-    # unset xtics 
+    unset xtics 
     do for [i=1:$totMO] {
         set arrow from word(xLcoord,i),word(ycoord,i) to word(xRcoord,i),word(ycoord,i) nohead lw 5
         set label word(num,i) at word(labelcoord,i),word(ycoord,i)
@@ -160,14 +177,7 @@ gnuplot << EOF
     set label 'HOMO' at word(labelcoord,$HOMO),$HOMOcoord
     p 'coord.dat' u 2:3
 
-    # MO figures
-    # first trial - unset multiplot - cannot control the ration of MO figures; bug in dx,dx setting. 
-    # ref.: https://www.techrepublic.com/blog/linux-and-open-source/how-to-use-clip-art-in-your-gnuplot-charts/
-    # p 'CO2_MO_E.dat' u 2:3, 'MO.1.png' binary filetype=png with rgbimage
-    # p 'MO.1.png' binary filetype=png origin=(word(MOxcoord,$HOMO),word(ycoord,$HOMO) )  with rgbimage 
-    # plot for [i=1:5] 'MO.'.i.'.png' binary filetype=png origin=( word(MOxcoord,i),word(ycoord,i) ) dx=0.01 dy=0.001 with rgbimage
-
-    # the secend trial - set multiplot
+    # MO figures - 2020/03/12 - the secend trial - set multiplot
     # ref. change coordinate system from screen to graph 
     # 1. http://gnuplot.10905.n7.nabble.com/placing-graph-origin-at-exact-location-respect-to-other-graph-in-multiplot-td20684.html
     # 2. https://stackoverflow.com/questions/44043914/conversion-between-gnuplots-coordinates-systems
@@ -176,45 +186,22 @@ gnuplot << EOF
     unset label
     set size square
     unset tics
-    set size 0.15,0.15
+    set size 0.12,0.12
 
-   
-
-    do for [i=1:25] {
+   xlength= word(Xwindow,2) - word(Xwindow,1) 
+   ylength= word(Ewindow,2) - word(Ewindow,1) 
+    do for [i=$figMIN:$figMAX] {
         # change graph coordinate to screen coordinate 
-        GRAPH_X = (word(MOxcoord,i) + 0.5 - GPVAL_X_MIN) / (GPVAL_X_MAX - GPVAL_X_MIN)
-        GRAPH_Y = (word(ycoord,i) +20 - GPVAL_Y_MIN) / (GPVAL_Y_MAX - GPVAL_Y_MIN)
-        SCREEN_X = GPVAL_TERM_XMIN + GRAPH_X * (GPVAL_TERM_XMAX - GPVAL_TERM_XMIN)
-        SCREEN_Y = GPVAL_TERM_YMIN + GRAPH_Y * (GPVAL_TERM_YMAX - GPVAL_TERM_YMIN)
-        FRAC_X = SCREEN_X * GPVAL_TERM_SCALE / GPVAL_TERM_XSIZE
-        FRAC_Y = SCREEN_Y * GPVAL_TERM_SCALE / GPVAL_TERM_YSIZE
+        FRAC_X = ( word(MOxcoord,i) - word(Xwindow,1) ) / xlength
+        FRAC_Y = ( word(ycoord,i) - word(Ewindow,1) ) * 0.9 / ylength 
         set origin FRAC_X,FRAC_Y  # screen coordinate 
         set title sprintf("%i",i) offset 0,-1
         plot 'MO.'.i.'.png' binary filetype=png with rgbimage 
-        print i,word(MOxcoord,i)+0.5,' ',word(ycoord,i),' ',FRAC_X,' ',FRAC_Y
+        # print i,' ',word(MOxcoord,i),' ',word(ycoord,i),' ',FRAC_X,' ',FRAC_Y
     }
-
-    
-    # GRAPH_X = (word(MOxcoord,11) + 0.5 - GPVAL_X_MIN) / (GPVAL_X_MAX - GPVAL_X_MIN)
-    # GRAPH_Y = (word(ycoord,11) - GPVAL_Y_MIN) / (GPVAL_Y_MAX - GPVAL_Y_MIN)
-    # SCREEN_X = GPVAL_TERM_XMIN + GRAPH_X * (GPVAL_TERM_XMAX - GPVAL_TERM_XMIN)
-    # SCREEN_Y = GPVAL_TERM_YMIN + GRAPH_Y * (GPVAL_TERM_YMAX - GPVAL_TERM_YMIN)
-    # FRAC_X = SCREEN_X * GPVAL_TERM_SCALE / GPVAL_TERM_XSIZE
-    # FRAC_Y = SCREEN_Y * GPVAL_TERM_SCALE / GPVAL_TERM_YSIZE
-
-    # print GPVAL_Y_MIN,GPVAL_Y_MAX,GPVAL_TERM_YMIN,GPVAL_TERM_YMAX, GPVAL_TERM_YSIZE
-    # print SCREEN_Y,GPVAL_TERM_SCALE
-    # print GRAPH_Y
-    # print word(MOxcoord,1)+0.5,' ',word(ycoord,1)
-    # print FRAC_X,' ',FRAC_Y
-
-    # set origin FRAC_X,0.06
-    # set title '11' offset 0,-1
-    # p 'MO.1.png' binary filetype=png with rgbimage
-
 EOF
 
-# rm -f $1
+rm -f $1
 }
  
 main $1
