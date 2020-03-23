@@ -5,7 +5,7 @@
 #       in advanced (via. Jmol).                                        #
 #                                                                       #
 #   Input:                                                              #
-#       $1 = MO energy                                                  #
+#       $1 = gaissian output file; *.log                                #
 #        2 = there ar a series of MO.$i.png in the same dir.            #
 #                                                                       #
 #   Output:                                                             #
@@ -19,16 +19,26 @@
 #########################################################################
 
 # global variables
-Xwindow=(-2.5 2.5)
-Ewindow=(-0.6 0.4) # select part of MOs, depends on system
+# Xwindow=(-2.5 2.5)
+Xwindow=(-1.0 1.0)
+Ewindow=(0.15 0.5) # select part of MOs, depends on system
 totMO=$(grep -A 1 num $1 | tail -n 1 | awk '{print $1}')
 
 function main {
+    # grepAllMO $1 # output: MO_E.dat TODO:
     assignMO $1 coord.dat # output: coord.dat, format: $num $x $y
     assignHOMO $1  # output variable: $HOMO
     HOMO=$(echo $?)
     plotMO coord.dat $HOMO # output: Espectra.eps, MO.eps
 }
+
+function grepAllMO {
+    # $1 = *.log 
+    NBasis=$(grep NBasis $1 | tail -n 1 | awk '{print $2}')
+    line=$(( $NBasis/5 )) #TODO:
+    grep 'Alpha' $1 | grep 'eigenvalues' | tail -n $line > MOEnergy.dat 
+}
+
 
 function assignMO {
     #   $1 = MO energy 
@@ -104,14 +114,14 @@ function plotMO {
     for ((i=0;i<=$(($totMO-1));i++))
     do 
         if (( $(echo "${y[$i]} > ${Ewindow[0]}" | bc -l) )); then 
-            figMIN=$i
+            figMIN=$(($i+1)) #array of gnuplot starts from 1 
             break
         fi 
     done
     for ((i=$figMIN;i<=$(($totMO-1));i++))
     do 
         if (( $(echo "${y[$i]} > ${Ewindow[1]}" | bc -l) )); then 
-            figMAX=$(($i-1))
+            figMAX=$i #array of gnuplot starts from 1 
             break
         fi 
     done
@@ -169,7 +179,7 @@ gnuplot << EOF
     # Energy spectra; set MO energy bars and their numbering
     set size ratio 1.5
     unset xtics 
-    do for [i=1:$totMO] {
+    do for [i=$figMIN:$figMAX] {
         set arrow from word(xLcoord,i),word(ycoord,i) to word(xRcoord,i),word(ycoord,i) nohead lw 5
         set label word(num,i) at word(labelcoord,i),word(ycoord,i)
     }
@@ -186,6 +196,7 @@ gnuplot << EOF
     unset label
     set size square
     unset tics
+    # set size 0.15,0.15
     set size 0.12,0.12
 
    xlength= word(Xwindow,2) - word(Xwindow,1) 
