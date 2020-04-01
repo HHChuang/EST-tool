@@ -21,6 +21,7 @@
 # global variables
 # Xwindow=(-2.5 2.5)
 Xwindow=(-1.0 1.0)
+# Ewindow=(-0.75 -0.35)
 Ewindow=(0.15 0.5) # select part of MOs, depends on system
 totMO=$(grep -A 1 num $1 | tail -n 1 | awk '{print $1}')
 
