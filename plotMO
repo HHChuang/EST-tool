@@ -6,7 +6,7 @@
 #                                                                       #
 #   Input:                                                              #
 #       $1 = gaissian output file; *.log                                #
-#        2 = there ar a series of MO.$i.png in the same dir.            #
+#       $2 = there ar a series of MO.$i.png in the same dir.            #
 #                                                                       #
 #   Output:                                                             #
 #       1. Espectra.eps; plot all MO energy spectra                     #
