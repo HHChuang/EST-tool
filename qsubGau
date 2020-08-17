@@ -1,84 +1,289 @@
 #!/bin/bash
-#############################################################################
-# Program :								   									#
-#	Create the submitted file of GAUSSIAN09 input file in elderberry server #
-#   IP: 140.109.90.234                                                      #
-#                                                                           #
-# Input:									   								#
-#	$1=all; submit all Gaussian input files.			   					#
-#	$1=test.com; submit one Gaussian input file.			   				#
-# Output:								   									#
-#	*.sge (submitted file)					   								#
-#                                                                           #
-# History:                                                                  #
-# 2015/04/15, Grace, revise                                                 #
-# 2015/11/16, Grace, test version, change PBS system into SGE system        #
-# 2015/11/26, Grace, split jobs into several sge file                       #
-# 2016/11/11, Grace, change output extension to .log                        #
-# 2019/04/20, Grace, change to gaussian 16, and modify the structure of code#   
-#                                                                           #
-#############################################################################
+#################################################################################
+# Program :								   									    #
+#	Create file(s) to manipulate how to submit GAUSSIAN16 input file(s) in      #
+#   remote server(s).                                                           #
+#                                                                               #
+#   Five classifications of jobs are provided:                                  #
+#   1. single input files                                                       #
+#   2. all the input files in the same folder                                   #
+#   3. fial jobs                                                                #
+#   4. selected input files which are include in a list                         #
+#   5. selected input files which are typed manually                            #
+#                                                                               #
+# Input:									   								    #
+#   $1 has several options                                                      #
+#   1. test.com; submit one Gaussian input file.                                #
+#	2. 'all'; submit all Gaussian input files.			   					    #
+#   3. 'fail'; submit input files if the previous calculation failed.           #
+#   4. 'list.dat'; submit selected files in list.dat                            #
+#				   				                                                #
+#   If the number of command-line auguments are more than one, then it goes to  #
+#   submit selected input files.                                                #
+#   example:                                                                    #
+#   > qsubGau test1.com test2.com test3.com                                     #
+#   Then, it submits 3 selected input files.                                    #
+#				   				                                                #
+# Output:								   									    #
+#	*.sge (submitted file)					   								    #
+#                                                                               #
+# History:                                                                      #
+# 2015/04/15, Grace, revised IAMS script.                                       #
+# 2015/11/16, Grace, test version, change PBS system into SGE system.           #
+# 2015/11/26, Grace, split jobs into several sge files.                         #
+# 2016/11/11, Grace, change output extension to .log.                           #
+# 2019/04/20, Grace, change to gaussian 16, and modify the structure of code.   #   
+# 2020/07/08, Grace, add if condition in the 3rd step in the main function.	    #
+# 2020/08/12, Grace, add the third modes; submit selected jobs.				    #
+# 2020/08/17, Grace, five modes completed.                                      #
+#                                                                               #
+#################################################################################
 
-# functions 
-function check(){
-    # $1 = 'all' or filename
-    [ "$1" == "" ] && \
-    echo 'No file, you must key-in "all" or the name of G16 input file' && \
-    exit
-    testall=$(ls | grep '.com' )
-    [ "$testall" == "" ] && \
-    echo 'No G16 input file; filename extension is .com' && exit
+inp_ext='.com'
+out_ext='.log'
+
+# Main program
+function main(){
+	# 1. std-out announcement
+	stdout 
+    
+    # 2. check the input arguments 
+    checkArg $# $1 # output: $? = $mode = 1 - 5
+    mode=$? # 1. single job, 2. all jobs, 3. fail jobs, 4. selected jobs in a list, 5. selected jobs by typing their name
+    
+    # 2. count gaussian input into a list
+    Arg=$@ # still one variable
+    genlist $mode $Arg # output: list.dat 
+    
+    # 3. user defined: select the amount of nodes
+    selectNumNode list.dat # output: $? = $Nnode
+    Nnode=$? 
+
+    # 4. generate the header of submitted files
+    genSGEfile $Nnode list.dat # output: SGElist.dat 
+
+    # 5. submit files
+    for name in `cat SGElist.dat`
+    do 
+        qsub $name 
+    done 
+    rm -f SGElist.dat list.dat
+}
+
+function stdout(){
+cat << EOF
+--------------------------------------------------------
+qsubGau has 5 modes to submit Gaussian input files: 
+1. single job; \$1 = test$inp_ext
+2. all jobs; \$1 = 'all'
+3. failed jobs; \$1 = 'fail'
+4. selected a losts jobs; \$1 = 'list.dat'
+5. selected small amount jobs; more than one command-line arguments.
+--------------------------------------------------------
+EOF
+}
+
+function checkArg(){
+    # $1 = numbers of command-line arguments
+    # $2 = the first command-line argument
+    if [ "$1" == '' ] 
+    then 
+        echo 'Empty command-line argument. Stop program.' 
+        exit
+    elif [ "$1" == 1 ] # mode 1 to 4
+    then 
+        if [ "$2" == 'all' ] # mode 2
+        then 
+            testall=$(ls | grep -c $inp_ext )
+            if [ "$testall" == 0 ] 
+            then 
+                echo 'No G16 input file; filename extension is "$inp_ext". Stop program.' 
+                exit
+            fi 
+            return 2
+        elif [ "$2" == 'fail' ] # mode 3
+        then 
+            return 3
+        elif [ "$2" == 'list.dat' ] # mode 4
+        then
+            if [ -f list.dat ]
+            then
+                if [ ! -s list.dat ]
+                then
+                    echo 'list.dat is a empry file. Stop program.'
+                    exit
+                fi 
+            else 
+                echo 'list.dat is not exist. Stop program.'
+                exit 
+            fi 
+            return 4
+        else      # mode 1
+            return 1
+        fi 
+    elif [ "$1" -gt 1 ] # mode 5
+    then 
+        return 5
+    else 
+        echo 'Bug in command-line arguments. Stop program.'
+        exit
+    fi 
 }
 
 function genlist(){
-    # $1 = 'all' or filename
-    if [ "$1" == "all" ]
+    #   $1 = $mode  
+    #   $2 = name of input; 'all'; 'fail'; 'list.dat'; or more than one arguments.
+    allArg=(`echo $@`) 
+    if [ "${allArg[0]}" -eq 1 ] # single job
+    then 
+        echo $2 | sed "s/$inp_ext//g" > list.dat 
+    elif [ "${allArg[0]}" -eq 2 ] # all jobs
     then
-        ls | grep '.com'  | sed 's/.com//g' > list.dat
-        
-    else
-        echo $1 | sed 's/.com//g' > list.dat 
-    fi
+        ls | grep $inp_ext  | sed "s/$inp_ext//g" > list.dat
+    elif [ "${allArg[0]}" -eq 3 ] # failed jobs
+    then 
+        ls | grep '.log' | sed 's/.log//g' > alljobs.dat 
+        rm -f list.dat 
+        touch list.dat 
+        for name in `cat alljobs.dat`
+        do 
+            num=$(grep -c 'Normal termination of Gaussian' $name.log )
+            if [ "$num" -eq 0 ]
+            then 
+                echo $name >> list.dat 
+            fi
+        done 
+        if [ ! -s list.dat ]
+        then
+            echo 'No failed jobs in the current folder.'
+            echo 'Please change mode. Stop program.'
+            exit
+        fi 
+        rm -f alljobs.dat 
+    elif [ "${allArg[0]}" -eq 4 ] # selected jobs in a list
+    then
+        num=$(grep -c $inp_ext list.dat)
+        if [ "$num" -gt 0 ]
+        then 
+            cat list.dat | sed "s/$inp_ext//g" > tmplist.dat 
+            mv -f tmplist.dat list.dat 
+        else 
+            echo "Wrong format in the list.dat. Stop program."
+            exit
+        fi 
+    elif [ "${allArg[0]}" -eq 5 ] # selected jobs by typing their name
+    then 
+        rm -f list.dat 
+        for ((i=1;i<${#allArg[@]};i++ ))
+        do 
+            echo ${allArg[$i]} | sed "s/$inp_ext//g">> list.dat 
+        done
+    else 
+        echo 'Bug in function genlist(). Stop program.'
+        exit
+    fi 
 }
 
 function selectNumNode(){
     # $1 = list.dat 
     njobs=$(wc -l $1 | awk '{print $1}')
-    echo ''
-    echo "Amount of jobs: $njobs"
-    echo "Current PATH: `pwd`"
-    echo ''
-    read -p 'How many nodes do you want? ' Nnode
-    echo ''
+    if [ $njobs -eq 1 ]
+    then
+        return 1
+    else
+        echo '--------------------------------------------------------'
+        echo "Amount of jobs: $njobs"
+        echo ''
+        read -p 'How many nodes do you want? ' Nnode
+        echo '--------------------------------------------------------'
+        if [ $Nnode -gt $njobs ] 
+        then 
+            echo "Amount of node ($Nnode) is larger than jobs ($njobs). Stop program." 
+            exit
+        fi
+        return $Nnode 
+    fi
 }
 
-function qsub_header(){
-    # $1 = $Nnode 
+function genSGEfile(){
+    # $1 = Nnode
     # $2 = list.dat 
-    # $3 = $fileName
-    Njobs=$(wc -l $2 | awk '{print $1}')
-    quotient=$(( $Njobs/$1 ))
-    remainder=$(( $Njobs%$1 ))
-    for (( i=1;i<= $1; i++))
-    do
-cat << EOF > $3$i.sge
+
+    Node=$1
+    njobs=$(wc -l $2 | awk '{print $1}')
+    jobname=( `cat $2` )
+    if [ $njobs -eq 1 ] 
+    then 
+        #initial setting: SGE name = file name 
+        sgename=$jobname
+
+        # change SGE filename if the original one exists
+        check_sgename=$(checkSGEfilename $sgename) 
+        
+        SGEheader $check_sgename # output: $check_filename.sge 
+        SGEfoot $check_sgename $jobname # output: $check_filename.sge 
+        echo $check_sgename\.sge > SGElist.dat 
+    else
+        quotient=$(( $njobs/$1 ))
+        remainder=$(( $njobs%$1 ))
+        # sgelist=(Vodka Whiskey Brandy Vermouth Cognac Beer PortWine Rum Gin)
+        sgelist=(WagakkiBand SuzuhanaYuko Machiya NinagawaBeni IbukuroKiyoshi Asa KaminagaDaisuke Wasabi Kurona)
+        
+        rm -f SGElist.dat 
+        ini_job=0
+        for ((Node_i=1;Node_i<=$Node;Node_i++))
+        do 
+            sgename=${sgelist[$(( $RANDOM%9 ))]}
+            check_sgename=$(checkSGEfilename $sgename) 
+            SGEheader $check_sgename
+            
+            # allocate amount of input files in one SGE file
+            if [ "$remainder" -eq 0 ]
+            then 
+                joblen=$quotient
+            else
+                if [ "$Node_i" -le $remainder ]
+                then
+                    joblen=$(( $quotient + 1 ))
+                else 
+                    joblen=$quotient
+                fi 
+            fi 
+            part_jobname=${jobname[@]:$ini_job:$joblen}
+            ini_job=$(( $ini_job + $joblen ))
+            
+            SGEfoot $check_sgename $part_jobname
+            echo $check_sgename\.sge >> SGElist.dat 
+        done 
+    fi  
+}
+
+function checkSGEfilename(){
+    # $1 = $filename 
+    nSameSGE=$( ls | grep "$1" | grep -c 'sge$' ) 
+    if [ "$nSameSGE" == 0 ]
+    then
+        echo $1
+    else 
+        echo $1\_$nSameSGE 
+    fi 
+}
+
+function SGEheader(){
+    # $1 = $filename
+cat << EOF > $1.sge
 #!/bin/bash
 ############################################################
 #  Program :                                               #
 #       Submit the Gaussian 16 job through SGE(sun grid    #
 #       engine) system                                     #
 ############################################################
-# 2019/04/20, Grace, g16 version
-export PATH=$PATH:$HOME/bin:/opt/util
+# Grace, d02223134@g.ntu.edu.tw
 
 ### Default Control
-## Run job through bash shell
 #$ -S /bin/sh -w w -j y -cwd 	### Run job through bash shell
-### Join stdout and stderr
 #$ -j y							### Join stdout and stderr
-## Resource control' 
-## $ -l hostname='q9*|q8*|q7*|q1*'			### Resource control
-### Use current working directory
+##$ -l hostname='q41|q86|q91|q92'			### Resource control
 #$ -cwd							### Use current working directory
 
 ### SGE Environment
@@ -104,61 +309,17 @@ echo g16 scratch is \$GAUSS_SCRDIR
 ### Job Script
 echo "Your job:"
 EOF
-    done
 }
 
-function qsub_foot(){
-    # $1 = $Nnode 
-    # $2 = $quotient 
-    # $3 = $remainder
-    # $4 = list.dat
-    # $5 = $fileName
-
-    a=0
-    for (( i=1;i<=$1;i++ ))
+function SGEfoot(){
+    # $1 = SGE filename 
+    # $2 = array of jobname
+    selected_jobname=(`echo $@`)
+    sgefile=${selected_jobname[0]}
+    for ((i=1;i<${#selected_jobname[@]};i++))
     do 
-        for (( j=1;j<=$2;j++))
-        do 
-            a=$(( $a+1 ))
-            jobname=$( sed -n "$a,$a p" $4)
-cat << EOF >> $5$i.sge
-time g16  < $jobname.com  > $jobname.log
-EOF
-        done
-    done
-
-    if [ $3 != '0' ]
-    then
-        for (( j=1;j<=$3;j++ ))
-        do 
-            a=$(( $a+1 ))
-            jobname=$( sed -n "$a,$a p" $4)
-cat << EOF >> $5$1.sge
-time g16 <  $jobname.com  >  $jobname.log
-EOF
-        done
-    fi
+        echo "time g16  < ${selected_jobname[$i]}$inp_ext  > ${selected_jobname[$i]}$out_ext" >> $sgefile\.sge 
+    done 
 }
 
-# Main program
-function main(){
-    # 1. check the input arguments have problem or not
-    check $1 
-    # 2. count all/selected gaussian input into a list
-    genlist $1 # output: list.dat 
-    # 3. user defined: select the amount of nodes
-    selectNumNode list.dat # output variable: Nnode
-    # 4. generate the header of submitted files
-    filelist=(Vodka Whiskey Brandy Vermouth Cognac Beer PortWine Rum Gin)
-    fileName=${filelist[$(( $RANDOM%10 ))]}
-    qsub_header $Nnode list.dat $fileName # output variables: 1. $quotient, 2. $remainder
-    # 5. allocate jobs into different submitted files
-    qsub_foot $Nnode $quotient $remainder list.dat $fileName
-    for ((i=1;i<=$Nnode;i++))
-    do
-        qsub $fileName$i.sge 
-    done
-    rm -f list.dat 
-    }
-
-main $1
+main $@

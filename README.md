@@ -1,18 +1,14 @@
-# Overview
-   **Purpose:** 
+# Purpose
    Tools for electronic structure theory (EST) calculation (e.g. Gaussian, QChem). 
    
-   **What I learn:**
-   'We make a living by what we get, but we make a life by what we give.- Winston Churchill'
-   
-## 1. Programming Language : 
+## Programming Language : 
+- Fortran
 - Bash shell script
-- Fortran 
 - Gnuplot
 - Python
-- Matlab
+<!-- - Matlab -->
 
-## 2. File name: 
+<!-- ## 2. File name: 
 
 ### Single programming language:
 1. Bash shell script: start from lowercase, ex. check*,get*
@@ -23,15 +19,16 @@
 
 - Mixed programming language
 1. Bash shell + Gnuplot : *.sh.gnu
-2. Bash shell + Python: *.sh.py
+2. Bash shell + Python: *.sh.py -->
 
-## 3. Purpose of main category
-1. check*,Check* 
+## Purpose of main category
+1. check*, Check* 
    - Check the status
 2. get*, Get*
    - Extract the selected data
 3. qsub*
-   - Submit the job
+   - Submit input file(s)
+
 ## 4. Instruction of each program
 1. **Bash shell script**
    - `qsubGau` - 2015/10/13,Grace
@@ -120,8 +117,8 @@
    - `plotContour.sh.gnu` - 2016/08/04, Grace
      - plot contour
 
----
+<!-- ---
 ## History:
 - 2015/10/13, Grace, 1st. ver.			
 - 2016/11/04, Grace, 2nd. ver.									
-- 2016/11/04, Grace, 2nd. ver.									
+- 2016/11/04, Grace, 2nd. ver.									 -->
