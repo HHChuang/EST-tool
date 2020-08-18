@@ -1,0 +1,420 @@
+#!/bin/csh -f
+
+### csh -x for debug
+
+#echo $*
+set VERSION = 1.0
+
+### release 1.0
+# support array jobs. see http://wiki.gridengine.info/wiki/index.php/Simple-Job-Array-Howto
+# usage: qcsub -t 1-10 qchem.in.SGE_TASK_ID qchem.out.SGE_TASK
+
+# == Structure of qcsub ====================================================================
+# 
+# 'qcsub' is a easily used wrapper for submitting your job through qchem and qsub.
+# Parts of 'qcsub' are copied from 'qchem' so that
+# most options can be passed through as well as those in 'qchem'.
+# Few options has been added to control your job as you do in 'qsub', -q and -N.
+# 
+# qcsub [ -N JobName ] [ -q NodeList ] [ -v TagQC ] [ qchem options ] \
+# 	 [ -script scriptfile | infile outfile [qcrun ] ]
+#
+# ==========================================================================================
+
+### Sun Grid Engine Configuration
+#
+#setenv SGE_CELL default
+#setenv SGE_ROOT /opt/n1ge6
+#if (-e $SGE_ROOT/$SGE_CELL/common/settings.csh) source $SGE_ROOT/$SGE_CELL/common/settings.csh
+
+set SGE_QCHEM = "/opt/rc/qcsub.sge"
+set USAGE = "Usage: qcsub [ -N jobname ] [ -save ] [ -np procs | -nt threads ] infile outfile [ runname ]"
+
+### debug
+#echo "$argv[*]"
+
+set scriptfile = ""
+set scriptparam = ""
+set global = ""
+set tag = ""
+set debug = ""
+set vib = ""
+
+unset prcs
+set threads = 1
+
+set queue = "all.q"
+set pe = "hydra" 
+
+set resource = ""
+set nodelist = '*'
+
+set m_options = "n"
+set m_list = "$USER"
+
+while (`echo $1 |cut -c1` == "-")
+   set val=$argv[1]
+   shift
+   switch ($val)
+   ## qchem-options
+   case -save:
+      set debug = "-save"
+      breaksw
+   case -np: 
+      set prcs=$argv[1]
+      if (`echo $prcs | grep -c '[a-zA-Z]'` == 1) then
+         echo The argument should be numbers. Your input \"${prcs}\" is wrong
+         echo $USAGE
+	 exit -1
+      endif
+      if ( "$prcs" =~ [0-9],* ) then
+         echo "This is a parallel run using dynamical allocations ($prcs)"
+      else if ( $prcs <= 1 ) then
+          unset $prcs 
+      else if ( $prcs > 4 && $USER == "jtlin" ) then
+            set prcs=8
+      else
+         if ( $prcs > 4 && `qconf -su xlab | grep -c $USER` == 1 ) then 
+            set prcs=4
+            echo "Your parallel CPUs are limited to $prcs"
+         endif
+         echo "This is a parallel run on $prcs processors"
+      endif
+      shift
+      breaksw
+   case -nt: 
+      set threads=$argv[1]
+      if (`echo $threads | grep -c '[a-zA-Z]'` == 1) then
+         echo The argument should be numbers. Your input \"${threads}\" is wrong
+         echo $USAGE
+	 exit -1
+      endif
+      echo "This is a serial run on $threads threads"
+      shift
+      breaksw
+
+
+   ## set global scratch
+   case -g:
+      if ( "$argv[1]" =~ /* ) then
+          set global = $argv[1]
+          shift
+      else
+          set global = "/work/$USER/qcscr"
+          if (! -e /work/$USER/qcscr) then
+              make -p /work/$USER/qcscr
+          endif
+      endif
+      breaksw
+
+   ## user-defined tag
+   case -v:
+      set tag = $argv[1]
+      shift
+      breaksw
+
+   ## invoke stuff copy for vibration analysis
+   case -vib:
+      set vib = "norm"
+      breaksw
+
+   ## sge-options
+   case -N: 
+      set jobname = $argv[1]
+      shift
+      breaksw
+   case -pe:
+      set pe = $argv[1]
+      shift
+      breaksw
+   case -q:
+      set node = "$argv[1]"
+      #if ( "$node" =~ "@*" ) then
+	set queue = "all.q@${node}"
+        #echo "$queue"
+      #else
+        #set nodelist = "${node}"
+        #echo "$nodelist"
+      #endif 
+      shift
+      breaksw
+   case -m: 
+      set m_options = $argv[1]
+      shift
+      breaksw
+   case -M: 
+      set m_list = "$argv[1]"
+      shift
+      breaksw
+
+   ## script for batch jobs
+   case -script:
+      set scriptfile = $argv[1]
+      if (! -e $scriptfile) then
+         echo Cannot find file: $scriptfile
+         exit -1
+      endif
+      shift
+      breaksw
+
+   case -param:
+      set scriptparam = "$argv[1]"
+      shift
+      breaksw
+
+   default:
+      # --- There is something wrong
+      echo "$1 is not a valid flag"
+      echo $USAGE
+      exit 4
+      breaksw
+   endsw
+end
+
+# Now that we have parsed the flags
+# let's make sure the rest of the usage is correct
+
+if ( $?prcs ) then
+   if ( $prcs > 1 && $threads > 1 ) then
+      echo Hybrid  MPI+OpenMP is not supported at present
+      echo $USAGE
+      exit -1
+   endif
+endif
+
+if ($#argv < 2) then
+   echo "Need at least to specify the input & output files."
+   echo $USAGE
+   echo -n "Hit Enter to start manual page ..."
+   set ANS = $<
+
+   if ( -x /usr/bin/perl ) then 
+      /usr/bin/perl -x $0  
+      exit -1
+   endif
+
+   cat << EXAMPLE
+ 
+   eg. to submit a serial job with a jobname 'helloqchem'
+   \$ $0 -N helloqchem qchem.in qchem.out
+
+   eg. to submit a 4-cpu parallel job 
+   \$ $0 -np 4 qchem.in qchem.out
+						Version $VERSION / Wesley
+EXAMPLE
+   exit -1
+endif
+
+if ($#argv > 3) then 
+   echo "Too many input arguements"
+   echo $USAGE
+   exit -1 
+endif
+
+if (! -e ${1}) then	# check input file
+   echo "Cannot find input file: '$1'"
+   echo "Your current directory is: " 
+   echo `pwd`
+   exit -1
+endif
+
+#if (-e ${2}) then
+#   echo -n "The output file '$2' was found. Overwrite? [yes/no]: "
+#   set ANS = $<
+#   if ($ANS == "no") then
+#      echo "Exit"
+#      exit -1
+#   endif 
+#endif 
+
+if ($status != 0) then	# if there is something goes wrong before
+   echo "Error: in input file processing"
+   exit -1 
+endif
+
+if (! $?jobname) set jobname = "qcsub_`basename ${1} .in`"
+
+set infile = ${1}
+set outfile = ${2}
+
+set qcrun = ""
+if ($#argv == 3) set qcrun = $3
+
+if ( "$tag" == "mpd" || "$pe" == "mpd" ) then
+   echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+   echo "'qcsub -v mpd -pe mpd'" is no longer used
+   echo for running direct-coupling job.
+   echo Please use "'qcsub -v dc'" instead.
+   echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+   exit -1
+endif
+
+if ( "$tag" != "ccman2" ) then
+   echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+   echo If you need to run CCMAN2 or ADC calculation,
+   echo please use "'qcsub -v ccman2'" to submit job.
+   echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+endif
+
+
+if ( "$tag" == "qc43" ) then
+    . /opt/intel/bin/compilervars.sh intel64
+endif
+
+
+## Everything done. Now submit jobs ...
+
+if ( $?prcs ) then
+  set qccmd = "$debug $infile $outfile $qcrun"
+  echo qsub -N $jobname -l hostname="'$nodelist'" -pe $pe $prcs -q "'$queue'" -m $m_options -M $m_list \
+	-v tag=\"$tag\" -v global=\"$global\" -v qcrun=\"$qccmd\" $SGE_QCHEM
+  qsub -N $jobname -l hostname="$nodelist" -pe $pe $prcs -q "$queue" -m $m_options -M $m_list \
+	-v vib="$vib" \
+	-v tag="$tag" -v global="$global" -v scriptfile="$scriptfile" -v scriptparam="$scriptparam" -v qcrun="$qccmd" $SGE_QCHEM
+else if ( ${threads} > 1 ) then
+  set pe = "serial"
+  set qccmd = "$debug $infile $outfile $qcrun"
+  echo qsub -N $jobname -l hostname="'$nodelist'" -pe $pe $threads -q "'$queue'" -m $m_options -M $m_list \
+	-v tag=\"$tag\" -v global=\"$global\" -v threads=\"$threads\" -v qcrun=\"$qccmd\" $SGE_QCHEM
+  qsub -N $jobname -l hostname="$nodelist" -pe $pe $threads -q "$queue" -m $m_options -M $m_list \
+	-v vib="$vib" \
+	-v tag="$tag" -v global="$global" -v threads="$threads" \
+	-v scriptfile="$scriptfile" -v scriptparam="$scriptparam" -v qcrun="$qccmd" $SGE_QCHEM
+else 
+  set qccmd = "$debug $infile $outfile $qcrun"
+  echo qsub -N $jobname -l hostname="'$nodelist'"  -q "'$queue'" -m $m_options -M $m_list \
+	-v tag=\"$tag\" -v global=\"$global\" -v qcrun=\"$qccmd\" $SGE_QCHEM
+  qsub -N $jobname -l hostname="$nodelist" -q "$queue" -m $m_options -M $m_list \
+	-v vib="$vib" \
+	-v tag="$tag" -v global="$global" -v scriptfile="$scriptfile" -v scriptparam="$scriptparam" -v qcrun="$qccmd" $SGE_QCHEM
+endif
+
+exit 0
+
+# ====================== perl script start =========================
+#!/usr/bin/perl 
+
+use strict;
+use Pod::Usage;
+# print man page and exit if requested.
+pod2usage(-exitstatus => 0, -verbose => 2);
+
+# embedded documentation.
+
+__END__
+
+=head1 NAME
+
+qcsub - submit a Q-CHEM job to the SGE queue system.
+
+=head1 SYNOPSIS
+
+I<qcsub> [ options ] I<infile> I<outfile> [ runname ]
+
+=head2 Options:
+
+=head3 Q-CHEM related
+
+=over 5
+
+=item -save 		save temporary files to I<$QCSCRATCH> at the end of calculation. 
+
+=item -N B<jobname>	set the name of this job. 
+
+=item -np B<procs>		invoke a parallel job with B<procs> cpus.
+
+=item -nt B<threads>	invoke a multi-trhead job with B<threads> cpus (for CC calc.) 
+
+=item -g [B<dir>]		set I<$QCSCRATCH> to a globally accessible directory.
+
+=back
+
+=head3 SGE related
+
+=over 4
+
+=item -pe B<pe_name>	specify the parallel environment.
+
+=item -q B<nodelist>	specify the B<nodelist>B where you want to run the job.
+
+=item -m B<m_options>	defines or redefines under which circumstances mail is to be sent.
+
+=item -M B<mail_list>	defines the list of users to which the server that executes the job has to send mail.
+
+=back
+
+=head1 DESCRIPTION
+
+I<qcsub> is a script to submit a Q-CHEM calculation to the SGE queue system
+(currently the gridengine). The usage of I<qcsub> is similar to what I<qchem>
+command dose.  Furthermore, few options are added in order to control the job
+through the queue system manager.
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<infile>
+
+A Q-CHEM input and must be set.
+
+=item B<outfile>
+
+A Q-CHEM output and must be set.
+
+=item B<-save, runname>
+
+In a Q-CHEM job, I<$QCSCRATCH> is a place to store temporary files
+during the computation. Those files will be removed at the end of job
+except for the options B<-save> or B<runname> to be set.
+In default, I<$QCSCRATCH> is set on a local disk. Currently it is
+C</scratch/$USER/qchem>. 
+
+=item B<-N> I<jobname>
+
+Give a name to the Q-CHEM job used in the queue system. The prefix I<qcsub_>
+with the input basename is given as the default job name.
+
+=item B<-np> I<procs> 
+
+Set one number or a set of numbers of slots used for a parallel qchem job. The
+default is to run a serial qchem job. This value can be an integer or a set of
+integers, e.g I<-np 1,2,4> which allows SGE to schedule available number of
+slots. The recommended number of cpus is I<4>.
+
+=item B<-g>
+
+Set the I<$QCSCRATCH> to a globally accessiable directory which is
+C</work/$USER/qcscr> in default.
+
+=item B<-q> I<nodelist>
+
+Here I<nodelist> can be a single hostname as I<q1> or a hostlist where the
+string is used for regular boolean expression matching. eg.
+I<'q41|q42'>, I<'q4[1-6]'> or I<'q4*|q5*'>.
+
+=back
+
+=head1 EXAMPLES
+
+ To submit a serial job with a jobname 'helloqchem':
+ $ qcsub -N helloqchem qchem.in qchem.out
+
+ To submit a 4-cpu Q-CHEM job:
+ $ qcsub -np 4 qchem.in qchem.out
+
+ To submit a Q-CHEM job on q14 with tunable number of slots:
+ $ qcsub -q q14 -np 1,2,4,8 qchem.in qchem.out
+
+ Send mail to me when job is done:
+ $ qcsub -m e -M me@mail.com qchem.in qchem.out
+
+=head1 VERSION
+
+2012-11-25
+
+=head1 AUTHOR
+
+Wesley You <zqyou.sinica@gmail.com>
+
+=cut

@@ -1,0 +1,200 @@
+#!/bin/csh -f
+
+#### csh -x for debug
+
+#echo $*
+set VERSION = 0.1
+
+### Sun Grid Engine Configuration
+#
+#setenv SGE_CELL default
+#setenv SGE_ROOT /opt/n1ge6
+#if (-e $SGE_ROOT/$SGE_CELL/common/settings.csh) source $SGE_ROOT/$SGE_CELL/common/settings.csh
+
+set SGE_G16 = "/opt/rc/g16sub.sge"
+set USAGE = "Usage: g16sub [ -N jobname ] inpfile [ outfile ]"
+
+set prcs = 1
+set queue = "all.q"
+set pe = "serial" 
+set chkfile = ""
+
+set resource = ""
+set nodelist = '*'
+
+set m_options = "n"
+set m_list = "$USER"
+
+while (`echo $1 |cut -c1` == "-")
+   set val=$argv[1]
+   shift
+   switch ($val)
+   ## sge-options
+   case -N: 
+      set jobname = $argv[1]
+      shift
+      breaksw
+   case -q:
+      set node = "$argv[1]"
+      #if ( "$node" =~ "@*" ) then
+	set queue = "all.q@${node}"
+        #echo "$queue"
+      #else
+        #set nodelist = "${node}"
+        #echo "$nodelist"
+      #endif 
+      shift
+      breaksw
+   case -m: 
+      set m_options = $argv[1]
+      shift
+      breaksw
+   case -M: 
+      set m_list = "$argv[1]"
+      shift
+      breaksw
+
+   default:
+      # --- There is something wrong
+      echo "$1 is not a valid flag"
+      echo $USAGE
+      exit 4
+      breaksw
+   endsw
+end
+
+# Now that we have parsed the flags
+# let's make sure the rest of the usage is correct
+
+if ($#argv < 1) then
+   echo "Need at least to specify the input & output files."
+   echo $USAGE
+   echo -n "Hit Enter to start manual page ..."
+   set ANS = $<
+
+   if ( -x /usr/bin/perl ) then 
+      /usr/bin/perl -x $0  
+      exit -1
+   endif
+
+   cat << EXAMPLE
+ 
+   eg. to submit a g16 job
+   \$ $0 g16.com
+
+						Version $VERSION / Wesley
+EXAMPLE
+   exit -1
+endif
+
+if ($#argv > 2) then 
+   echo "Too many input arguements"
+   echo $USAGE
+   exit -1 
+endif
+
+set inp = ${1}
+set out = ${2}
+
+if (! -e $inp) then	# check input file
+   echo "Cannot find input file: '$inp'"
+   echo "Your current directory is: " 
+   echo `pwd`
+   exit -1
+endif
+
+if (! $?out) then
+   set out = ""
+endif
+
+### determine # of processors requested
+dos2unix $inp	### prevent crash from stupid M$
+if (`grep -i -c '%nproc' $inp` > 0) then
+   set ncpus = `grep -i '%nproc' $inp |head -n 1 |cut -d'=' -f2`
+   set prcs = $ncpus
+endif
+
+if (`grep -i -c '%chk' $inp` > 0) then
+   set chk = `grep -i '%chk' $inp |head -n 1 |cut -d'=' -f2`
+   if (`echo $chk | grep -i -c /scratch/$USER/g03` == 1) then
+      echo Save checkpoing file as $chk. GOOD IDEA 
+      set chkfile = $chk
+   else
+      echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+      echo Attemp to save checkpoing file $chk in $PWD
+      echo This is a really BAD BAD IDEA ....
+      echo Please save it in path /scratch/$USER/g03/
+      echo It will be moved back to $PWD after job done
+      echo @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+   endif
+endif
+
+#if ($status != 0) then	# if there is something goes wrong before
+#   echo "Error: in input file processing"
+#   exit -1 
+#endif
+
+if (! $?jobname) set jobname = "g16sub_$inp:r:t"
+
+## Everything done. Now submit jobs ...
+
+if (${prcs} > 1) then
+  set qccmd = "g16 $inp $out"
+  echo qsub -N $jobname -l hostname="'$nodelist'" -pe $pe $prcs -q "'$queue'" -m $m_options -M $m_list -v chkfile=\"$chkfile\" -v qcrun=\"$qccmd\" $SGE_G16
+  qsub -N $jobname -l hostname="$nodelist" -pe $pe $prcs -q "$queue" -m $m_options -M $m_list -v chkfile="$chkfile" -v qcrun="$qccmd"  $SGE_G16
+else
+  set qccmd = "g16 $inp $out"
+  echo qsub -N $jobname -l hostname="'$nodelist'"  -q "'$queue'" -m $m_options -M $m_list -v chkfile=\"$chkfile\" -v qcrun=\"$qccmd\" $SGE_G16
+  qsub -N $jobname -l hostname="$nodelist" -q "$queue" -m $m_options -M $m_list -v chkfile="$chkfile" -v qcrun="$qccmd" $SGE_G16
+endif
+
+exit 0
+
+# ====================== perl script start =========================
+#!/usr/bin/perl 
+
+use strict;
+use Pod::Usage;
+# print man page and exit if requested.
+pod2usage(-exitstatus => 0, -verbose => 2);
+
+# embedded documentation.
+
+__END__
+
+=head1 NAME
+
+g16sub - submit a G16 job to the SGE queue system.
+
+=head1 SYNOPSIS
+
+I<g16sub> [ options ] I<infile> [ outfile ]
+
+=head2 Options:
+ 
+ -N <jobname>	set the name of this job. 
+ -q <nodelist>	specify the '<nodelist>' where you want to run the job.
+ -m <mail_options> defines or redefines under which circumstances mail is to be sent.
+ -M <mail_list> defines the list of users to which the server that executes the job has to send mail.
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<-q> I<nodelist>
+
+Here I<nodelist> can be a single hostname as I<q1> or a hostlist where the
+string is used for regular boolean expression matching. eg.
+I<'q41|q42'>, I<'q4[1-6]'> or I<'q4*'>.
+
+=back
+
+=head1 VERSION
+
+Version 0.1
+
+=head1 AUTHOR
+
+Wesley You <zqyou.sinica@gmail.com>
+
+=cut
