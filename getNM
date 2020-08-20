@@ -3,13 +3,14 @@
 #	Program :															#
 #		Extract the normal mode eigenvector	from Gaussian/QChem job		#
 #	Input :																#
-#		$1 = test.out; QChem output file								#
+#		$1 = test.out or test.log							            #
 #	Output :															#
 #		NM.txt															#
+#                                                                       #
+# History:                                                              #
+# 2016/04/12, Grace, 1st. ver.                                          #
+# 2017/10/23, Grace, 2nd. ver.                                          #
 #########################################################################
-
-# 2016/04/12, Grace, 1st. ver.
-# 2017/10/23, Grace, 2nd. ver. 
 
 #Step0. check
 [ "$1" == "" ] && echo 'No file, you must key-in the name of qchem output file' && exit

@@ -1,18 +1,19 @@
 #!/bin/bash
-#########################################################################
-#Program :						      		#
+#####################################################################
+#Program :						      						  		#
 #	Extract the optimized coordinate from a Gaussian/QChem      	#
-#	output file.					      		#
-#Input: 					    	       		#	
-#	$1=test; Gaussian/QChem output file                     	#
-#Output: 						      		#
-#	1. Std out						      	#
-#	2. *.xyz; user defined (can be used in Jmol)			#
-#########################################################################
+#	output file.					      					  		#
+#Input: 					    	       					  		#	
+#	$1=test; Gaussian/QChem output file                     	    #
+#Output: 						      						  		#
+#	1. Std out						      						  	#
+#	2. *.xyz; user defined (can be used in Jmol)					#
+#####################################################################
 
 # 2012/04/22, Grace, 1st. ver.
 # 2016/10/24, Grace, 2nd. ver.
 # 2017/10/23, Grace, 3nd. ver. combine Gaussian and QChem
+# 2019/03/22, Grace, 4th. ver. grep post-HF energy in Gaussian part
 
 #Step0. check the status of input file
 [ "$1" == "" ] && \
@@ -43,15 +44,37 @@ rm -f coord.tmp
 if [ "$GorQ" = true ]; then 
     # Gaussian
     num=$(grep -w 'NAtoms' $1 | head -n 1 | awk '{print $2}' )
+	
     grep -A $(($num+4)) 'Input orientation:' $1 | tail -n $num | \
-        awk '{print $2 "\t" $4 "\t" $5 "\t" $6}' > coord.tmp
-    #grep -A $(($num+4)) 'Standard orientation:' $1 | tail -n $num > coord.tmp
+    #grep -A $(($num+4)) 'Standard orientation:' $1 | tail -n $num | \
+	#grep -A $(($num+4)) 'Z-Matrix orientation:' $1 | tail -n $num | \
+		awk '{print $2 "\t" $4 "\t" $5 "\t" $6}' > coord.tmp
     cat coord.tmp > $2
-    E=$(grep 'SCF Done' $1 | tail -n 1 | awk '{print $5}')
+	
+        #The keyword for MP2 is 'EUMP2',and for CCSD is 'CORR'. Others
+        #are 'SCF Done'.
+        method=$(grep ' CORR ' $1|tail -n 1)
+        [ "$method" == '' ] && method=$(grep 'EUMP2' $1|tail -n 1) \
+        || method='CORR'
+        if [ "$method" != 'CORR' ]; then
+            [ "$method" == '' ] && method='SCF Done' || method='EUMP2'
+        fi  
+        rowE=$(grep "$method" $1 | tail -n 1)
+        case $method in
+        "CORR")
+            E=$(echo $rowE | awk '{print $4}')
+            ;;  
+        "EUMP2")
+            E=$(echo $rowE | awk '{print $6}' | sed 's/D/E/g' ) 
+            ;;  
+        "SCF Done") # HF and DFT
+            E=$(echo $rowE | awk '{print $5}')
+			method=$(grep 'SCF Done:' $1 | tail -n 1 | awk '{print $3}' \
+					| sed 's/E(//g' | sed 's/)//g')
+        ;;  
+        esac 	
     sym=$(grep 'point group' $1 | tail -n 1 | awk '{print $4}')
     basis=$(grep 'Standard basis' $1 | tail -n 1 | awk '{print $3}')
-    method=$(grep 'SCF Done:' $1 | tail -n 1 | awk '{print $3}' \
-            | sed 's/E(//g' | sed 's/)//g')
 else
     # QChem
     num=$(grep -B 2 'Molecular Point Group' $1 | head -n 1 \
@@ -72,7 +95,7 @@ fi
 
 #Step2. print the result
 echo $num > $2
-echo "# $1 $method/$basis $sym" >> $2
+echo "# $1 $method/$basis $E $sym" >> $2
 cat  coord.tmp >> $2
 
 echo "File name:        "$2
