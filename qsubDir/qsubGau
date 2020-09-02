@@ -46,6 +46,7 @@ out_ext='.log'
 function main(){
 	# 1. std-out announcement
 	stdout 
+    exit
     
     # 2. check the input arguments 
     checkArg $# $1 # output: $? = $mode = 1 - 5

@@ -66,7 +66,7 @@ function main(){
 function stdout(){
 cat << EOF
 --------------------------------------------------------
-qsubGau has 5 modes to submit Gaussian input files: 
+qsubQch has 5 modes to submit Gaussian input files: 
 1. single job; \$1 = test$inp_ext
 2. all jobs; \$1 = 'all'
 3. failed jobs; \$1 = 'fail'
@@ -268,7 +268,7 @@ cat << EOF > $1.sge
 #!/bin/bash
 ############################################################
 #  Program :                                               #
-#       Submit the Molpro job through SGE(sun grid engine) #
+#       Submit the QChem job through SGE(sun grid engine)  #
 ############################################################
 # Grace, d02223134@g.ntu.edu.tw
 
@@ -289,8 +289,34 @@ echo '    Date:' `date`
 echo 'Directory:' `pwd` 
 
 ### QChem Setup 
-export QChem_EXEDIR=/opt/qchem/cvs/exe/qcprog.exe.5.release
-export PATH=\$MOLPRO_EXEDIR:$PATH
+# 
+# export QChem_EXEDIR=/opt/qchem/cvs/exe/qcprog.exe.5.release
+# export QChem_EXEDIR=/opt/qchem/cvs/exe/qcprog.exe.Grace
+
+export QCPROG=qcprog.exe.Grace
+#FIXME: 
+export QC=/work/qchem/trunk/developer/\$USER/qchem
+export QCSCRATCH=/scratch/\$USER/qchem
+export QCAUX=/work/qchem/trunk/qcaux
+export QCMPI=openmpi
+export QC_EXT_LIBS=/work/qchem/trunk/qclib
+export QCPLATFORM=LINUX_Ix86_64
+export QCRSH=ssh
+export PATH=\$QC_EXT_LIBS:\$QC_EXT_LIBS/openmpi/lib:\$QC_EXT_LIBS/openmpi/bin:\$QC/bin:\$QC/bin/perl:$PATH
+export LD_LIBARY_PATH=\$QC_EXT_LIBS/openmpi/lib:$LD_LIBARY_PATH
+if [ -e \$QC/bin/qchem.setup.sh ]; then
+        source \$QC/bin/qchem.setup.sh
+fi
+
+echo ''
+echo == Q-CHEM Environment ==
+echo qchem bindir is \$QC
+test ! -d \$QCLOCALSCR && make -p \$QCLOCALSCR
+echo qchem local scratch is \$QCLOCALSCR
+test ! -d \$QCSCRATCH && make -p \$QCSCRATCH
+echo qchem scratch is \$QCSCRATCH
+
+export PATH=$PATH:/opt/util
 
 ### Job Script
 echo "Your job:"
@@ -304,7 +330,11 @@ function SGEfoot(){
     sgefile=${selected_jobname[0]}
     for ((i=1;i<${#selected_jobname[@]};i++))
     do 
-        echo "time qchem  < ${selected_jobname[$i]}$inp_ext  > ${selected_jobname[$i]}$out_ext" >> $sgefile\.sge 
+        # echo "time qchem  ${selected_jobname[$i]}$inp_ext  ${selected_jobname[$i]}$out_ext" >> $sgefile\.sge 
+        echo "echo qchem ${selected_jobname[$i]}$inp_ext ${selected_jobname[$i]}$out_ext" >> $sgefile\.sge 
+        echo "echo Stdout from job:" >> $sgefile\.sge 
+        # echo "time qchem \$QC/\exe/\/\$QCPROG  ${selected_jobname[$i]}$inp_ext  \$QCSCRATCH > ${selected_jobname[$i]}$out_ext" >> $sgefile\.sge 
+        echo "time qchem ${selected_jobname[$i]}$inp_ext ${selected_jobname[$i]}$out_ext" >> $sgefile\.sge 
     done 
 }
 
