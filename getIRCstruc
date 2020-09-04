@@ -51,7 +51,7 @@ function main(){
         cat Reverse.xyz > $2 
         cat TS.xyz >> $2 
         cat Forward.xyz >> $2 
-        rm -f Reverse.xyz TS.xyz Reverse.xyz 
+        rm -f Reverse.xyz TS.xyz Forward.xyz Forward.dat Reverse.dat 
     else 
         extractStruc $1 $NAtoms tmp.xyz 
         cat TS.xyz > $2 
@@ -160,6 +160,7 @@ function extractStruc(){
             | grep -A $((2+$NAtoms)) 'Coordinates (Angstroms)' \
             | tail -n $NAtoms | awk '{print $2,$4,$5,$6}' >> $3
     done
+    rm -f iniL.dat finL.dat 
 }
 
 function revStruc(){

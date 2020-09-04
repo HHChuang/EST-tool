@@ -10,12 +10,14 @@
 #       $3 = Traj; structures of single trajectory              #
 #                                                               #
 # Output:                                                       #
-#       rot.$3                                                  #
+#       1. rot.$3                                               #
+#       2. cen.$2                                               #
 #                                                               #
 # History:                                                      #
 # 2018/12/21, Grace                                             #
 # 2019/06/04, Grace, modify the structure of this code, and     #
 # reserve the comment line from the original trajectories.      #
+# 2020/09/04, Grace, add one more output as cen.$1              #
 #################################################################
 
 import numpy as np
@@ -26,28 +28,31 @@ import sys
 def main():
     # 1. optimize rotation matrix via Kabsch algorithm
     # by minimize the RMSD between two similar structures
-    R, D = rotM_D()
+    R, D = rotM_D()  # output: cen.$1
 
     # 2. use above rotation matrix to rotate all the
     # structures in one dynamic trajectory
-    rot_tran_Traj(R, D)
+    rot_tran_Traj(R, D)  # output: rot.$3
 
 
 def get_coord(filename):
+    global NAtoms
+    global atoms
+
     f = open(filename, 'r')
     V = list()
     atoms = list()
-    n_atoms = int(f.readline())
+    NAtoms = int(f.readline())
 
     f.readline()
 
     for lines_read, line in enumerate(f):
 
-        if lines_read == n_atoms:
+        if lines_read == NAtoms:
             break
 
         # atom = re.findall(r'[a-zA-Z]+', line)[0]
-        atom = re.findall(r'[0-9]', line)[0]
+        atom = re.findall(r'[0-9]*', line)[0]
         atom = atom.upper()
 
         numbers = re.findall(r'[-]?\d+\.\d*(?:[Ee][-\+]\d+)?', line)
@@ -112,26 +117,44 @@ def rotM_D():
     coord_ref_cen = coord_ref - centroid(coord_ref)
     # Distance between two centroids
     D = centroid(coord_var) - centroid(coord_ref)
+    # print(D)
 
     R = kabsch(coord_var_cen, coord_ref_cen)
     coord_var_cen = np.dot(coord_var_cen, R)
     rmsd2 = rmsd(coord_var_cen, coord_ref_cen)
+
+    print('RMSD before/after rotation and translation (angstrom): ')
     print("% 7.4f % 7.4f" % (rmsd1, rmsd2))
+
     # print(R)
     # frag = str(sys.argv[1]).split('.')
     # np.savetxt('.'.join(['rotM', frag[3]]), R, fmt='%10.6f')
+
+    # extract the reference structure with respect to its centroid; output: cen.$2
+    filename = 'cen.' + str(sys.argv[2]).split('/')[-1]
+    file_coord_ref_cen = open(filename, 'w')
+    file_coord_ref_cen.write(str(NAtoms) + '\n')  # NAtoms
+    file_coord_ref_cen.write(filename + '\n')
+    for i in range(NAtoms):
+        line = str(atoms[i]) +\
+            ' ' + str('%f' % (coord_ref_cen[i][0])) +\
+            ' ' + str('%f' % (coord_ref_cen[i][1])) +\
+            ' ' + str('%f' % (coord_ref_cen[i][2])) + '\n'
+        file_coord_ref_cen.write(line)
+
+    file_coord_ref_cen.close()
+
     return R, D
 
 
 def get_traj(allTraj, n1, n2):
     coord = list()
-    natom = n2 - n1
     atom = list()
     # slicing array
     comment = str(allTraj[n1 - 1])
     tmp = allTraj[n1:n2]
 
-    for i in range(natom):
+    for i in range(NAtoms):
         # may have bug, change '\t' to ' '
         atom.append(tmp[i].split(' ')[0])
         coord.append(tmp[i].split(' ')[1:4])
