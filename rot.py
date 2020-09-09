@@ -17,7 +17,7 @@
 # 2018/12/21, Grace                                             #
 # 2019/06/04, Grace, modify the structure of this code, and     #
 # reserve the comment line from the original trajectories.      #
-# 2020/09/04, Grace, add one more output as cen.$1              #
+# 2020/09/04, Grace, add one more output as cen.$2              #
 #################################################################
 
 import numpy as np
