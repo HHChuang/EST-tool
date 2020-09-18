@@ -8,10 +8,12 @@
 #			$2 = header.txt ; info. of $rem							#
 #	Output :														#
 #			lots of *.com											#
+#                                                                   #
+#   History:                                                        #
+# 2016/04/20, Grace, 1st. ver.                                      #
+# 2019/03/26, Grace, bugs from the negative coordinate              #
+# 2020/09/18. Grace, add the third input file as the footer.        #
 #####################################################################
-
-# 2016/04/20, Grace, 1st. ver.
-# 2019/03/26, Grace, bugs from the negative coordinate 
 
 # Step 1 Check the input arguments
 [ "$1" == "" ] && echo "file $1 is not exist, exit" && exit
@@ -40,6 +42,11 @@ scan potential
 
 $charge $multi
 `tail -n $natom tmp.txt`
+
+`if [ -f $3 ] 
+then 
+    cat $3
+fi`
 
 EOF
 done
