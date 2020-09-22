@@ -281,13 +281,7 @@ function analyseJobs(){
 
     if [ -f $ClassFile ]
     then
-        echo "Classification of the successful jobs:"
-        printf '%8s\t %5i\t \n' $(echo SP: $SP)
-        printf '%8s\t %5i\t \n' $(echo MIN: $MIN)
-        printf '%8s\t %5i\t \n' $(echo Saddle: $Saddle)
-        printf '%8s\t %5i\t \n' $(echo IRC: $IRC)
-        echo ""
-        echo "Detail of output: "
+        # stdoutClassResult $SP $MIN $Saddle $IRC 
 
         if [ -f SP.dat ]
         then
@@ -315,15 +309,11 @@ function analyseJobs(){
             for ((s=1;s<=$NumSaddle;s++))
             do 
                 IF=$(sed -n "$s,$s p " Saddle.dat | awk '{print $4}')
-                if [ $IF -eq 1 ]
+                if [ ! -z "$IF" ]
                 then
                     printf '%10s\t %16.10f\t %16.10f\t %2i\t %10.4f\n' $(sed -n "$s,$s p " Saddle.dat)
                 else
-                    printf '%10s\t %16.10f\t %16.10f\t %2i\t %10.4f\n' $(sed -n "$s,$s p " Saddle.dat)
-                    # for ((NumIF=2;NumIF<=$IF;NumIF++)) FIXME:
-                    # do 
-                    #     printf '\t \t \t \t \t \t \t \t \t %10.4f\n' $(tail -n $(($IF - 1)) $SaddleFile)
-                    # done 
+                    printf '\t \t \t \t \t \t \t \t \t %10.4f\n' $(sed -n "$s,$s p " Saddle.dat)
                 fi
             done 
         fi
@@ -363,5 +353,22 @@ Fail jobs are listed in file Fail.dat
 
 EOF
 }
+
+# function stdoutClassResult(){
+#     # $1 = $SP 
+#     # $2 = $MIN
+#     # $3 = $Saddle 
+#     # $4 = $IRC 
+
+# cat << EOF
+# Classification of the successful jobs:
+# `printf '%8s\t %5i\t \n' $(echo SP: $1)`
+# `printf '%8s\t %5i\t \n' $(echo MIN: $2)`
+# `printf '%8s\t %5i\t \n' $(echo Saddle: $3)`
+# `printf '%8s\t %5i\t \n' $(echo IRC: $4)`
+
+# Detail of output: 
+# EOF 
+# }
 
 main $@
