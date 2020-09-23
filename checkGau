@@ -10,7 +10,8 @@
 #       benchmark version : $1 = all                                        #
 #                                                                           #
 #   Output :                                                                #
-#       Std-out                                                             #
+#       1. Std-out                                                          #
+#       2. (SP.dat, MIN.dat, Saddle.dat and IRC.dat) depend on systems      #
 #                                                                           #
 #   History :                                                               #
 # 2016/11/03, Grace, 1st. ver. merge the function of checkGauOPT and        #
@@ -19,6 +20,7 @@
 # 2019/08/07, Grace, modify the structure of code; move main program in the #
 #   front and also remove redundant part.                                   #
 # 2020/09/22, Grace, change structure and also change g09 to g16.           #
+# 2020/09/23, Grace, add output as documents to save energy curve.          #
 #                                                                           #
 #############################################################################
 
@@ -281,7 +283,7 @@ function analyseJobs(){
 
     if [ -f $ClassFile ]
     then
-        # stdoutClassResult $SP $MIN $Saddle $IRC 
+        stdoutClassResult $SP $MIN $Saddle $IRC 
 
         if [ -f SP.dat ]
         then
@@ -328,8 +330,7 @@ function analyseJobs(){
             $(cat IRC.dat)
         fi
 
-        rm -f $StatFile $ClassFile $SPFile $MINFile $SaddleFile $IRCFile 
-        rm -f Fail.dat
+        rm -f $StatFile $ClassFile # $SPFile $MINFile $SaddleFile $IRCFile Fail.dat
     fi
 }
 
@@ -346,29 +347,36 @@ Count the amount of jobs:
 `printf '%8s\t %5i\t \n' $(echo Total: $1)`
 `printf '%8s\t %5i\t \n' $(echo Success: $2)`
 `printf '%8s\t %5i\t \n' $(echo Fail: $3)`
-#############################################################################
-----------------------------------------
-Fail jobs are listed in file Fail.dat
-----------------------------------------
 
 EOF
 }
 
-# function stdoutClassResult(){
-#     # $1 = $SP 
-#     # $2 = $MIN
-#     # $3 = $Saddle 
-#     # $4 = $IRC 
+function stdoutClassResult(){
+    # $1 = $SP 
+    # $2 = $MIN
+    # $3 = $Saddle 
+    # $4 = $IRC 
 
-# cat << EOF
-# Classification of the successful jobs:
-# `printf '%8s\t %5i\t \n' $(echo SP: $1)`
-# `printf '%8s\t %5i\t \n' $(echo MIN: $2)`
-# `printf '%8s\t %5i\t \n' $(echo Saddle: $3)`
-# `printf '%8s\t %5i\t \n' $(echo IRC: $4)`
+    [ `wc -l Fail.dat | awk '{print $1}' ` = 0 ] && FailFile='' || FailFile='Fail.dat' 
+    [ $1 = 0 ] && SPFile=''     || SPFile='SP.dat'
+    [ $2 = 0 ] && MINFile=''    || MINFile='MIN.dat'
+    [ $3 = 0 ] && SaddleFile='' || SaddleFile='Saddle.dat'
+    [ $4 = 0 ] && IRCFile=''    || IRCFile='IRC.dat'
 
-# Detail of output: 
-# EOF 
-# }
+cat << EOF
+Classification of the successful jobs:
+`printf '%8s\t %5i\t \n' $(echo SP: $1)`
+`printf '%8s\t %5i\t \n' $(echo MIN: $2)`
+`printf '%8s\t %5i\t \n' $(echo Saddle: $3)`
+`printf '%8s\t %5i\t \n' $(echo IRC: $4)`
+
+------------------------------------------------------------
+Output files: $FailFile $SPFile $MINFile $SaddleFile $IRCFile
+------------------------------------------------------------
+
+#############################################################################
+Detail of output: 
+EOF
+}
 
 main $@
