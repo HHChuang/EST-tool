@@ -29,6 +29,7 @@
 #                                                                               #
 # History:                                                                      #
 # 2020/08/17, Grace, copy from qsubGau, and modify $PATH.                       #
+# 2020/09/25, Grace, name of SGE file cannot start from digit.                  #
 #                                                                               #
 #################################################################################
 
@@ -48,14 +49,14 @@ function main(){
     Arg=$@ # still one variable
     genlist $mode $Arg # output: list.dat 
     
-    # 3. user defined: select the amount of nodes
+    # # 3. user defined: select the amount of nodes
     selectNumNode list.dat # output: $? = $Nnode
     Nnode=$? 
 
-    # 4. generate the header of submitted files
+    # # 4. generate the header of submitted files
     genSGEfile $Nnode list.dat # output: SGElist.dat 
 
-    # 5. submit files
+    # # 5. submit files
     for name in `cat SGElist.dat`
     do 
         qsub $name 
@@ -66,7 +67,7 @@ function main(){
 function stdout(){
 cat << EOF
 --------------------------------------------------------
-qsubGau has 5 modes to submit Gaussian input files: 
+qsubMol has 5 modes to submit Gaussian input files: 
 1. single job; \$1 = test$inp_ext
 2. all jobs; \$1 = 'all'
 3. failed jobs; \$1 = 'fail'
@@ -210,7 +211,9 @@ function genSGEfile(){
         #initial setting: SGE name = file name 
         sgename=$jobname
 
-        # change SGE filename if the original one exists
+        # change SGE filename 
+        #   1. if the original one exists
+        #   2. if it starts with a digit
         check_sgename=$(checkSGEfilename $sgename) 
         
         SGEheader $check_sgename # output: $check_filename.sge 
@@ -253,13 +256,25 @@ function genSGEfile(){
 
 function checkSGEfilename(){
     # $1 = $filename 
+
+    #   1. if the original one exists
     nSameSGE=$( ls | grep "$1" | grep -c 'sge$' ) 
     if [ "$nSameSGE" == 0 ]
     then
+        name=$(echo $1)
+    else 
+        name=$(echo $1\_$nSameSGE) 
+    fi 
+
+    #   2. if it starts with a digit
+    digitName=$(echo $name | grep ^[0-9] )
+    if [ -z "$digitName" ]
+    then
         echo $1
     else 
-        echo $1\_$nSameSGE 
-    fi 
+        # add prefix since SGE file cannot starts with a digit
+        echo job$1 
+    fi
 }
 
 function SGEheader(){

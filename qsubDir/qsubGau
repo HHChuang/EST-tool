@@ -36,6 +36,7 @@
 # 2020/07/08, Grace, add if condition in the 3rd step in the main function.	    #
 # 2020/08/12, Grace, add the third modes; submit selected jobs.				    #
 # 2020/08/17, Grace, five modes completed.                                      #
+# 2020/09/25, Grace, name of SGE file cannot start from digit.                  #
 #                                                                               #
 #################################################################################
 
@@ -218,7 +219,9 @@ function genSGEfile(){
         #initial setting: SGE name = file name 
         sgename=$jobname
 
-        # change SGE filename if the original one exists
+        # change SGE filename 
+        #   1. if the original one exists
+        #   2. if it starts with a digit
         check_sgename=$(checkSGEfilename $sgename) 
         
         SGEheader $check_sgename # output: $check_filename.sge 
@@ -261,13 +264,25 @@ function genSGEfile(){
 
 function checkSGEfilename(){
     # $1 = $filename 
+
+    #   1. if the original one exists
     nSameSGE=$( ls | grep "$1" | grep -c 'sge$' ) 
     if [ "$nSameSGE" == 0 ]
     then
+        name=$(echo $1)
+    else 
+        name=$(echo $1\_$nSameSGE) 
+    fi 
+
+    #   2. if it starts with a digit
+    digitName=$(echo $name | grep ^[0-9] )
+    if [ -z "$digitName" ]
+    then
         echo $1
     else 
-        echo $1\_$nSameSGE 
-    fi 
+        # add prefix since SGE file cannot starts with a digit
+        echo job$1 
+    fi
 }
 
 function SGEheader(){
