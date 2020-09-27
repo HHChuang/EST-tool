@@ -1,0 +1,424 @@
+#!/bin/csh -f
+#
+#     Confidential property of Q-Chem, Inc.
+#     Copyright (c) 1993 by Q-Chem, Inc. (unpublished)
+#     All rights reserved.
+#
+#     The above copyright notice is intended as a precaution against
+#     inadvertent publication and does not imply publication or any
+#     waiver of confidentiality. The year included in the foregoing 
+#     notice is the year of creation. This software product contains
+#     proprietary, confidential information and trade secrets of
+#     Q-Chem, Inc. and its licensors. No use may be made of this
+#     software except according to written agreement with Q-Chem, Inc.
+
+# 	$Id: qchem,v 1.59 2011/05/03 14:48:14 distrib Exp $	
+
+# Sets up and runs a Q-Chem job.
+#
+#    $1 = Input file
+#    $2 = Output file
+#    $3 = Run name (for saving files across runs -- optional)
+#
+# Options:
+#
+#    -save = Option to save files for debugging purpose with Run name
+#    -np [n]  = No. of processors for parallel run
+#    -pbs     = using PBS ... use PBS_NODEFILE
+#    -g       = Input is in Gaussian format
+#
+# BGJ (8/93)
+# PPK (07/2000)  Added parallel run options
+#
+
+if ($?QCSRC == 0) setenv QCSRC $QC
+if ($?QCBIN == 0) setenv QCBIN $QC/bin
+if ($?QCAUX == 0) setenv QCAUX $QC/qcaux
+
+# additional environment setting
+setenv GFORTRAN_UNBUFFERED_PRECONNECTED y
+setenv KMP_NUM_THREADS 1
+
+# Fix anything nasty potentially lurking in the environment
+source $QCSRC/bin/qcfixenv
+
+# SIMPER calculation can be specified by -simper flag
+setenv QCSIMPER nosimper
+
+# Print out the version info if it is there
+if ( -e $QC/version.txt ) then
+   set vers = `cat $QC/version.txt`
+   echo "You are running Q-Chem version: $vers"
+endif
+
+# q-chem script form parallel and serial versions
+# Determine whether this is a parallel 
+# or serial version of Q-Chem
+
+set qcprog_exe = $QC/exe/qcprog.exe
+if ( $?QCPROG ) then
+   set qcprog_exe = $QCPROG
+endif
+
+set QCNAME = qchem
+set WITH_MPI = 0
+if ( `${qcprog_exe} -p` == "mpi" ) then
+    set WITH_MPI = 1
+endif
+   
+set USAGE = "Usage: $QCNAME [ -save ] [ -nt threads ] infile [ outfile ] [ savename ]"
+if ( $WITH_MPI ) then
+    set USAGE = "Usage: $QCNAME [ -save ] [ -np procs | -nt threads ] infile [ outfile ] [ savename ]"
+endif
+
+# ------------ Parsing and Usage part -------------- #
+# --- Parse the dashed flags ---
+# if you would like to set a dash flag, this is the place to do it.
+
+set prcs=1
+set thds=1
+set pbs=""
+set gpu=""
+while ( `echo $1  | cut -c1` == "-" )
+   set val=$argv[1]
+     shift
+     switch ($val)
+     case -save:
+	set debug
+	breaksw
+     case -nt:
+	    set thds=$argv[1]
+	    if (`echo $thds | grep -c '[a-zA-Z]'` == 1) then
+		echo Threads numbers should be integer. Your input \"${thds}\" is wrong
+		echo $USAGE
+		exit (-1)
+	    endif
+	    echo "This is a multi-thread run using $thds threads"
+	    shift
+        breaksw
+     case -np:
+     # --- There is an -np
+	if ( $WITH_MPI ) then
+	    set prcs=$argv[1]
+	    if (`echo $prcs | grep -c '[a-zA-Z]'` == 1) then
+		echo Processor numbers should be numbers. Your input \"${prcs}\" is wrong
+		echo $USAGE
+		exit (-1)
+	    endif
+	    echo "This is a parallel run on $prcs processors"
+	    shift
+	else 
+	    echo "Invalid option: -np "
+	    echo "Not Valid for serial jobs"
+	    echo $USAGE
+            exit 4
+	endif
+	breaksw
+    case -gpu:
+       set gpu=true
+       breaksw
+    case -pbs:
+       set pbs=true
+       breaksw
+    case -g:
+	set dog
+	echo "input in gaussian format"
+	breaksw
+    case -simper:
+        setenv QCSIMPER simper
+        breaksw
+    case -dbg:
+        setenv QCDEBUG DEBUG
+        breaksw
+    case -valgrind:
+        setenv QCDEBUG VALGRIND
+        breaksw
+    case -seq:
+        unsetenv WITH_MPI
+    default:
+	# --- There is something wrong
+	echo "$1 is not a valid flag"
+	echo $USAGE
+	exit 4
+	breaksw
+    endsw
+end
+
+# Now that we have parsed the flags
+# let's make sure the rest of the usage is correct
+
+if( $#argv < 1 ) then
+    echo "Need at least to specify the input file."
+    echo $USAGE
+    exit -1
+endif
+
+if($#argv > 3) then 
+    echo "Too many input arguements"
+    echo $USAGE
+    exit -1 
+endif
+
+if(! -e ${1}) then
+    echo "Cannot find input file: '$1'"
+    echo "Your current directory is: " 
+    echo `pwd`
+    exit -1
+endif
+   
+if ($status != 0) then
+    echo "Error: in input file processing"
+    exit(-1)
+endif
+
+if ("x$gpu" == "xtrue") then
+    setenv BRIANQC_ENABLE 1
+    setenv INT_22 2
+    setenv INT_122 2
+    setenv INT_20 2
+    setenv INT_120 2
+endif
+if ( $prcs == 1 ) then
+    setenv INT_22 2
+endif
+#
+# Initialize multicore runs using -nt option
+#  ZGan
+#
+if ( $prcs > 1 ) then
+  if ( $thds > 1 ) then
+     echo "Hybrid  MPI+OpenMP is not supported at present" 
+     #echo "Reset number of threads of each process to 1 " 
+     #set thds=1 
+  endif
+endif
+setenv QCTHREADS $thds
+setenv OMP_NUM_THREADS $thds
+setenv MKL_NUM_THREADS 1
+#
+#if ($?QCTHREADS == 0) then
+#  setenv QCTHREADS 1
+#  if ($?OMP_NUM_THREADS == 0) then
+#     setenv OMP_NUM_THREADS $QCTHREADS
+#  endif
+#else
+#     setenv OMP_NUM_THREADS $QCTHREADS
+#endif
+
+
+set infile = $1
+#echo "input file is $infile"
+
+#  determine if the input file has multiple inuts
+set numinp=`grep -c "@@@" $infile`
+
+setenv QCOUTFILE stdout
+
+if ($#argv >= 2) then
+  setenv QCOUTFILE $2
+  if ( -e $QCOUTFILE ) then
+     #echo "$QCOUTFILE exists from a previous run. Removing the old file"
+     if ($QCOUTFILE != /dev/null) then
+       rm -rf $QCOUTFILE 
+     endif
+  endif
+endif
+#echo "output file is $QCOUTFILE"
+
+unset runname
+if ($#argv == 3) set runname = $3
+#echo "running directory is $runname"
+
+# Determine where the scratch files will go
+if ( ! $?QCSCRATCH ) then
+   echo Please define env QCSCRATCH.
+   exit(-1)
+else
+#  remove the possible last '/'.
+   set QCSCRATCH = `echo $QCSCRATCH | sed 's/\/*$//'`
+   setenv QCSCRATCH $QCSCRATCH
+endif
+
+# qclocalscr has to be different from qcscratch because:
+# 1. it is not necessary to define it;
+# 2. it should be a true local disk, and since qcscratch has to be
+#   visible to all the nodes, the two have to be different.
+
+if ( $?QCLOCALSCR ) then
+   if ($QCLOCALSCR == $QCSCRATCH) then
+      echo QCLOCALSCR equals QCSCRATCH.  Please unset the env QCLOCALSCR.
+      exit(-1)
+   endif
+   if (-e $QCLOCALSCR) then
+      set QCLOCALSCR=`echo $QCLOCALSCR | sed 's/\/*$//'`
+      setenv QCFILEPREF $QCLOCALSCR
+   else
+      echo "$QCLOCALSCR does not exist"
+      exit(-1)
+   endif
+else
+   setenv QCFILEPREF $QCSCRATCH
+endif
+
+#assign the scratch directory
+
+if ($?runname) then
+  ## ZGan fixed restart script for parallel run  ---2011-05 
+  if ( $prcs > 1 ) then
+  if ( -e ${QCFILEPREF}/${runname} ) then
+  set ipc = 0
+  while ( $ipc < $prcs ) 
+       if ( ! -e  ${QCFILEPREF}/${runname}.${ipc} ) then
+       cp -r -p ${QCFILEPREF}/${runname} ${QCFILEPREF}/${runname}.${ipc}
+       endif
+       @ ipc++
+  end
+  endif
+  endif
+  setenv QCFILEPREF ${QCFILEPREF}/${runname}/
+  setenv QCRUNNAME ${runname}
+  ##unset echo
+else
+  setenv QCFILEPREF ${QCFILEPREF}/qchem$$/
+  unsetenv QCRUNNAME
+  setenv QCRUNNAME qchem$$   
+endif
+
+# Create the job directory if it doesn't already exist
+#echo "The scratch directory used is $QCFILEPREF"
+
+if (! -e $QCFILEPREF) then
+  mkdir -p $QCFILEPREF
+endif
+
+#
+# if @@@ is found then split the file using the split.csh script
+#
+if ( $numinp > 0 ) then
+   $QC/bin/split.csh $1 $QCFILEPREF $$
+   if ($status != 0) then
+       #echo "Error: in splitting the input file"
+       exit(-1)
+   endif
+else
+   #echo "Processing single input"
+endif
+
+# Run the input through the Gaussian parser if in Gaussian format
+
+if ($?dog) then
+  g2q $infile ${QCFILEPREF}${infile}_q
+  if ($status != 0) then
+    echo "Error: Unable to parse Gaussian input"
+    exit(-1)
+  endif
+  set infile = ${QCFILEPREF}${infile}_q
+endif
+
+
+#
+# GUIFILE is used to hold checkpoint data for IQmol and other GUI programs
+# previously is Test.FChk, which fails with parallel runs, now it is set to
+# ${input}.fchk  -- note the changes in libmdc/GUIDumpData.C as well
+# 
+# ZGan 
+#
+set input=`basename $infile`
+setenv GUIFILE ${input}.fchk
+
+# This allows for inspecting the input name (without extension) using
+# `getenv()`.
+setenv QCINFILEBASE "${input:r}"
+
+# When running under HyperChem or when no output file is named,
+# output should go to stdout
+# if job is paralel call parallel.csh else call serial.csh
+#
+set progstat = 0
+if ( $WITH_MPI ) then
+   #echo "running parallel jobs"
+   $QC/bin/parallel.csh $infile $prcs $numinp $QCFILEPREF $$ $pbs
+   set progstat = $status
+else
+   #echo "running serial jobs"
+   $QC/bin/serial.csh $infile $numinp $QCFILEPREF $$
+   set progstat = $status
+endif
+
+# save4plot
+#  - copy 'plots' directory from qchem scratch to working direcotry
+#  - copy efiled.dat and plot.esp to 
+# It will be named as output_file_name.plots. If no output file name is given,
+# the input file name or $QCFILEREF will be used. 
+# This script works only for Linux and Mac? - ZQY
+if ($progstat == 0) then
+  `dirname $0`/save4plot
+endif
+
+# Final cleanup
+
+# Clean up scratch files.
+# For parallel jobs, the files are actually in $QCFILEPREF.*.
+# To remove files, first everything in $QCLOCALSCR since they
+# are already copied by the excutable to $QCSCRATCH.
+# If there is no $QCLOCALSCR, then we have to remove $QCFILEPREF.*
+# but not $QCFILEPREF in case they are used to restart.
+
+# remove the '/' at the end.
+setenv QCFILEPREF `echo $QCFILEPREF | sed 's/\/*$//'`
+
+# This is where you may wish to add cleaning up of scratch files
+# on other nodes.  The following is only for this node, Node 0.
+# The only scr dir left should be $QCSCRATCH/{runname}.
+if ( $?QCLOCALSCR ) then
+   rm -rf $QCFILEPREF*
+else if ( $WITH_MPI ) then
+   ## fix the deleting of plot directory with multi-process execution -- ZGan 2010-06-22
+   if ( -e ${QCFILEPREF}.0 ) then
+      cp -r -p  ${QCFILEPREF}.0/* $QCFILEPREF
+      rm -rf $QCFILEPREF.*
+   endif
+endif
+
+if ( ! $?runname ) then
+  #echo "Cleaning up the scratch directory"
+  if ( ! $?QCLOCALSCR ) rm -rf $QCFILEPREF*
+else if ( ! $?debug ) then
+# remove all but "important" files
+# assuming the files are copied into $QCSCRATCH/${runname}/ by the
+# code.
+#
+# JKN:  added "some" files for d-scfman.exe - restart 
+#
+  setenv QCFILEPREF $QCSCRATCH/${runname}
+  find $QCFILEPREF -type f -print | egrep -v "molecule|53|99|131|132|112|340|341|342|113|303|323|116|306|326|118|308|318|54|58|117|130|353|354|355|600|601|733|734|735|819|2051|2052|2060|plots|FILE" | xargs rm -f
+endif
+
+unsetenv QCFILEPREF
+unsetenv QCSIMPER
+
+# remove *.in.* files
+#echo remove input files
+set infile2=`basename $infile`
+foreach in ( .$infile2.$$.qcin.[0-9]* )
+   #echo "removing the file $in"
+   rm -f $in
+end
+
+unset infile runname dog
+unsetenv QCOUTFILE
+unsetenv QCINFILEBASE
+
+# Communicate the success/failure of the job to the parent process
+
+if ( $progstat != 0 ) then
+   if ( $WITH_MPI ) then
+       echo "Error: in the parallel run"
+#      exit(-1) 
+   else
+       echo "Error: in the serial run"
+#      exit(-1) 
+   endif
+endif
+
+exit($progstat)
