@@ -102,7 +102,7 @@ cat << EOF > $4.com
 
 $nele electrons, $norb orbital
 
-$charge $multi
+0 1
 EOF 
 
 # addGeoCoord $3 $4.com

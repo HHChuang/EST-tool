@@ -18,15 +18,17 @@
 #             checkGauPES and getGauEandZPE.	                            #
 # 2018/08/24, Grace, fix the bug of extracting many imaginary frequency     #
 # 2019/08/07, Grace, modify the structure of code; move main program in the #
-#   front and also remove redundant part.                                   #
+#             front and also remove redundant part.                         #
 # 2020/09/22, Grace, change structure and also change g09 to g16.           #
 # 2020/09/23, Grace, add output as documents to save energy curve.          #
+# 2020/10/05, Grace, changeFormatSaddle(): change the format of std-out in  #
+#             Saddle.dat.                                                   #
 #                                                                           #
 #############################################################################
 
 function main(){
     # 1. print out purpose 
-        # stdoutPurpose $1
+        stdoutPurpose $1
 
     # 2. check input argument $1
         getNumJobs $1 #output: list.dat and $NumJobs=$?
@@ -159,6 +161,39 @@ function classifyJobs(){
         rm -f name.dat IRC.dat IF.dat E.dat ZPE.dat 
     done
     rm -f NameList.dat 
+}
+
+function changeFormatSaddle(){
+    # $1 = Saddle.dat 
+
+    awk '{print $4}' `echo $1`| awk 'NF > 0' > NumIF.dat 
+    nline=0
+    rm -f saddle.tmp 
+    for IF in `cat NumIF.dat`
+    do 
+        nline=$(( $nline + 1 ))
+        if [ "$IF" == 1 ]
+        then
+            printf '%10s\t %16.10f\t %16.10f\t %2i\t %10.4f\n' $(sed -n "$nline,$nline p " `echo $1` ) >> saddle.tmp 
+        else
+            saddlename=$(sed -n "$nline,$nline p" `echo $1`| awk '{print $1}')
+            saddleE=$(sed -n "$nline,$nline p" `echo $1`| awk '{print $2}')
+            saddleZPE=$(sed -n "$nline,$nline p" `echo $1`| awk '{print $3}')
+            for ((s=1;s<=$IF;s++))
+            do 
+                if [ "$s" == 1 ]
+                then 
+                    saddleEig=$(sed -n "$nline,$nline p" `echo $1`| awk '{print $5}')
+                else 
+                    nline=$(( $nline + 1 ))
+                    saddleEig=$(sed -n "$nline,$nline p" `echo $1` )
+                fi
+                printf '%10s\t %16.10f\t %16.10f\t %2i\t %10.4f\n' "$saddlename" "$saddleE" "$saddleZPE" "$s" "$saddleEig" >> saddle.tmp 
+            done
+        fi
+    done
+    mv -f saddle.tmp Saddle.dat
+    rm -f NumIF.dat 
 }
 
 # sub-functions in classifyJobs(); countIF(), extractE(), extractZPE() and IRC()
@@ -307,17 +342,10 @@ function analyseJobs(){
             echo '----- Saddle -----'
             printf '%10s\t %16s\t %16s\t %3s\t %10s\t \n' \
             $(echo Name E\(hartree\) ZPE\(hartree\) \#IF IF\(cm^1\))
-            NumSaddle=$(wc -l Saddle.dat | awk '{print $1}')
-            for ((s=1;s<=$NumSaddle;s++))
-            do 
-                IF=$(sed -n "$s,$s p " Saddle.dat | awk '{print $4}')
-                if [ ! -z "$IF" ]
-                then
-                    printf '%10s\t %16.10f\t %16.10f\t %2i\t %10.4f\n' $(sed -n "$s,$s p " Saddle.dat)
-                else
-                    printf '\t \t \t \t \t \t \t \t \t %10.4f\n' $(sed -n "$s,$s p " Saddle.dat)
-                fi
-            done 
+            # 2020/10/05, Grace, separate higher-order saddle points
+            changeFormatSaddle Saddle.dat 
+            ### 
+            printf '%10s\t %16.10f\t %16.10f\t %2i\t %10.4f\n' $(cat Saddle.dat)
         fi
 
         if [ -f IRC.dat ]
