@@ -65,7 +65,7 @@ function main(){
     # 5. submit files
     for name in `cat SGElist.dat`
     do 
-        qsub $name 
+        qsub -pe serial 4 $name #test for parallel
     done 
     rm -f SGElist.dat list.dat
 }

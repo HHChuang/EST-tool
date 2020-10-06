@@ -202,8 +202,16 @@ function countIF(){
     # output : IF.dat
 
     # extract all frequency
+    # 2020/10/05, Grace, add constraints of counting normal modes
+    NAtoms=$(grep 'NAtoms' $1 | tail -n 1 | awk '{print $2}')
+    NumNM=$(( 3*NAtoms-6 )) # assume it is a nonlinear molecule
+    NumNMRemainder=$(( $NumNM%3 ))
+    NumNMRow=$(( $NumNM/3 ))
+
+    [ "$NumNMRemainder" != 0 ] && NumNMRow=$(( $NumNMRow + 1 ))
     grep -w 'Frequencies --' $1 | grep -v 'Frequencies ---' \
-    |awk '{print $3,$4,$5}' > FreqList
+        |awk '{print $3,$4,$5}' | tail -n $NumNMRow > FreqList
+    
     awk '{print $1}' FreqList > FreqListColumn
     awk '{print $2}' FreqList >> FreqListColumn
     awk '{print $3}' FreqList >> FreqListColumn

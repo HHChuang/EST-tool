@@ -1,49 +1,100 @@
 #!/bin/bash
-# 2018/08/23, Grace, rewrite
-# $1 = TS.log
+#############################################################################
+# Program :                                                                 #
+#   Generate a lot IRC input with different parameter setting in order to   #
+#   brute force of gaining more grid points of an IRC simulation.           #
+#                                                                           #
+# Intput:                                                                   #
+#   $1 = TS.log                                                             #
+#   $2 = GenEcp.dat                                                         #
+#                                                                           #
+# History:                                                                  #
+#   2018/08/23, Grace, rewrite.                                             #
+#   2020/10/05, Grace, add description and modify the structure of script.  #
+#############################################################################
+
+function main(){
+
+    # 1. Extract necessary rawdata from Gaussian output files
+        # global variable: $method, $basis, $charge, $multi
+        method=''
+        basis=''
+        charge=''
+        multi=''
+        ###
+        getCoord $1 # output: coord.tmp, and modify above global variables
+
+    # 2. Generate a series of IRC input files
+        # reference for parameters: https://gaussian.com/irc/
+        # global array 
+        algoArr=(HPC EulerPC LQA DVV)
+        forceArr=(CalcFC CalcAll)
+        stepsizeArr=(2 5 10)
+        coordArr=(Cartesian) #(Internal Cartesian MW)
+        ###
+        maxcycle=500
+        maxpoints=500 
+        genIRC $2
+
+}
 
 function getCoord(){
-    # $1 = TS.log
-    # $2 = 
+    # $1 = *.log; TS Gaussian output file 
     
     # Gaussian
     rm -f coord.tmp
     num=$(grep -w 'NAtoms' $1 | head -n 1 | awk '{print $2}' )
-    grep -A $(($num+4)) 'Input orientation:' $1 | tail -n $num | \
+    ### sometimes, the keyword changes, fuck! 
+    keywordCoord=('Input orientation:' 'Standard orientation:')
+    checkCoord=$(grep "${keywordCoord[0]}" $1) 
+    [ -z "$checkCoord" ] && numOrien=1 || numOrien=0
+    grep -A $(($num+4)) "${keywordCoord[$numOrien]}" $1 | tail -n $num | \
         awk '{print $2 "\t" $4 "\t" $5 "\t" $6}' > coord.tmp
-    #grep -A $(($num+4)) 'Standard orientation:' $1 | tail -n $num > coord.tmp
+    ###
     basis=$(grep 'Standard basis' $1 | tail -n 1 | awk '{print $3}')
+    [ -z "$basis" ] && basis='GenEcp'
     method=$(grep 'SCF Done:' $1 | tail -n 1 | awk '{print $3}' \
             | sed 's/E(//g' | sed 's/)//g')
     charge=$(grep Charge $1 | head -n 1 | awk '{print $3}')
     multi=$(grep Multiplicity $1 | head -n 1 | awk '{print $6}')
 }
 
-getCoord $1 # output: coord.tmp
-            # global variable: $method, $basis, $charge, $multi
-
-for coord in Internal Cartesian MW
-do
-	for force in CalcFC CalcAll #RCFC
-	do 
-		for stepsize in  5 10
-		do
-			name=$(echo "$coord.$force.$stepsize")
-		#	cp TS_ET.Rot_Cs.chk $name.chk
-#cat << EOF > $name.com
+function genIRC(){
+    # $1 = filename of ECP
+    n=0
+    for algo in `echo ${algoArr[@]}`
+    do 
+        for force in `echo ${forceArr[@]}`
+        do 
+            for stepsize in  `echo ${stepsizeArr[@]}`
+            do
+                for coord in `echo ${coordArr[@]}`
+                do
+                    n=$(($n+1))
+                    name=$(echo "$algo"_"$force"_"$stepsize"_"$coord")
+                    # echo $name
+                    #	cp TS_ET.Rot_Cs.chk $name.chk
 #%chk=$name.chk
 cat << EOF > $name.com
-# $method/$basis IRC($coord,$force,Stepsize=$stepsize,Forward,maxcycle=500,maxpoints=300) 
+# $method/$basis IRC($algo,$force,$coord,Stepsize=$stepsize,maxcycle=$maxcycle,maxpoints=$maxpoints) 
 
 IRC forward
 
 $charge $multi
 EOF
-    cat coord.tmp >> $name.com
-    echo '' >> $name.com
-			#g09sub $name.com $name.log
-		done
-	done
-done
+                    cat coord.tmp >> $name.com
+                    echo '' >> $name.com
+                    [ -z $1 ] || cat `echo $1` >> $name.com 
+                    echo '' >> $name.com 
 
-rm -f coord.tmp
+                #g09sub $name.com $name.log
+                done 
+            done
+        done
+    done
+    echo "There are $n IRC Gaussian input files"
+    rm -f coord.tmp
+}
+
+
+main $@
