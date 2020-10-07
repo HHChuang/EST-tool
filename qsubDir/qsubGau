@@ -47,7 +47,6 @@ out_ext='.log'
 function main(){
 	# 1. std-out announcement
 	stdout 
-    exit
     
     # 2. check the input arguments 
     checkArg $# $1 # output: $? = $mode = 1 - 5
@@ -67,7 +66,7 @@ function main(){
     # 5. submit files
     for name in `cat SGElist.dat`
     do 
-        qsub $name 
+        qsub -pe serial 4 $name 
     done 
     rm -f SGElist.dat list.dat
 }
