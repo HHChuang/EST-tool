@@ -304,24 +304,11 @@ echo '    Date:' `date`
 echo 'Directory:' `pwd` 
 
 ### QChem Setup 
-# 
-# export QChem_EXEDIR=/opt/qchem/cvs/exe/qcprog.exe.5.release
-# export QChem_EXEDIR=/opt/qchem/cvs/exe/qcprog.exe.Grace
-
-export QCPROG=qcprog.exe.Grace
-#FIXME: 
-export QC=/work/qchem/trunk/developer/\$USER/qchem
-export QCSCRATCH=/scratch/\$USER/qchem
-export QCAUX=/work/qchem/trunk/qcaux
-export QCMPI=openmpi
-export QC_EXT_LIBS=/work/qchem/trunk/qclib
-export QCPLATFORM=LINUX_Ix86_64
-export QCRSH=ssh
-export PATH=\$QC_EXT_LIBS:\$QC_EXT_LIBS/openmpi/lib:\$QC_EXT_LIBS/openmpi/bin:\$QC/bin:\$QC/bin/perl:$PATH
-export LD_LIBARY_PATH=\$QC_EXT_LIBS/openmpi/lib:$LD_LIBARY_PATH
-if [ -e \$QC/bin/qchem.setup.sh ]; then
-        source \$QC/bin/qchem.setup.sh
-fi
+export QC=/work/qchem/trunk/developer/$USER/qchem_531
+export QCEXE=/work/qchem/trunk/developer/$USER/qchem_531/build/qcprog.exe
+export QCAUX=/work/qchem/trunk/developer/qchem_common/qcaux
+export QCSCRATCH=/scratch/$USER/qchem 
+export QCLOCALSCR=/scratch/$USER/qclocal
 
 echo ''
 echo == Q-CHEM Environment ==
@@ -346,10 +333,11 @@ function SGEfoot(){
     for ((i=1;i<${#selected_jobname[@]};i++))
     do 
         # echo "time qchem  ${selected_jobname[$i]}$inp_ext  ${selected_jobname[$i]}$out_ext" >> $sgefile\.sge 
-        echo "echo qchem ${selected_jobname[$i]}$inp_ext ${selected_jobname[$i]}$out_ext" >> $sgefile\.sge 
-        echo "echo Stdout from job:" >> $sgefile\.sge 
+        # echo "echo $ ${selected_jobname[$i]}$inp_ext ${selected_jobname[$i]}$out_ext" >> $sgefile\.sge 
+        # echo "echo Stdout from job:" >> $sgefile\.sge 
         # echo "time qchem \$QC/\exe/\/\$QCPROG  ${selected_jobname[$i]}$inp_ext  \$QCSCRATCH > ${selected_jobname[$i]}$out_ext" >> $sgefile\.sge 
-        echo "time qchem ${selected_jobname[$i]}$inp_ext ${selected_jobname[$i]}$out_ext" >> $sgefile\.sge 
+        # echo "time qchem ${selected_jobname[$i]}$inp_ext ${selected_jobname[$i]}$out_ext" >> $sgefile\.sge 
+        echo "time \$QCEXE ${selected_jobname[$i]}$inp_ext scratch >& ${selected_jobname[$i]}$out_ext " >> $sgefile\.sge 
     done 
 }
 
