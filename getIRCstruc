@@ -4,80 +4,183 @@
 #																		#
 #	Input : 															#
 #			$1 = *.log													#
+#           $2 = user defined output filename                           #
 #	Output :															#
-#			$2 = user defined											#
 #			format														#
 #					number of atoms										#
 #					index of coordinate									# 
 #					name of atom (integer), xyz coordinate 				#
+#   History:                                                            #
+# 2016/11/13, Grace, 1st. ver.                                          #
+# 2017/05/22, Grace, 2nd. ver. change coord. into mass-weighted         #
+# 2017/07/02, Grace, 3rd. ver. debug                                    #
+# 2020/09/03, Grace, change the structure; create main function.        #
 #########################################################################
 
-# 2016/11/13, Grace, 1st. ver.
-# 2017/05/22, Grace, 2nd. ver. change coord. into mass-weighted
-# 2017/07/02, Grace, 3rd. ver. debug 
-
-################################################################################
-# Step 0. Std-out instruction and check the status of input argument
-test -f $1 || echo $1 is not exist
-[ "$1" == "" ] \
-&& echo "No input argument, please key-in the name of G09 file (e.g. *.log)" \
-&& exit
-[ "$2" == "" ] \
-&& echo "No input argument, please assign the filename of output (e.g. *.xyz)" \
-&& exit
-echo ''
-echo "--- Program $0 extracts all structures of"
-echo "--- G09 file $1 along IRC result"
-#name=$(echo $1 | sed 's/.log//')
-echo ''
-echo "Output data: $2"
-echo ''
-
-# Three IRC situations
-    # 1. Forward and Reverse
-    # 2. Forward only
-    # 3. Reverse only
-
-#################################################################################
-
-# variable
-NAtoms=$(grep NAtoms $1 | grep -v MOERIx | tail -n 1 | awk '{print $2}')
-TotalPoint=$(grep -c 'NET REACTION COORDINATE UP TO THIS POINT' $1 )	
-echo "Total amount of points (include TS) is : " $(($TotalPoint+1))
-echo ''
-# function
-function Tmp_ini() {
-# $1 = input file
-# $2 = index of step
-tmp_ini=$(grep -n 'Point Number:' $1 | awk '{print $1}' \
-			| sed 's/://g' | sed -n "$2,$2 p")
-}
-function Tmp_fin() {
-# $1 = input file
-# $2 = index of step
-tmp_fin=$(grep -n 'NET REACTION COORDINATE UP TO THIS POINT' $1 | awk '{print $1}' \
-			| sed 's/://g' | sed -n "$2,$2 p")
-}
-function Coord() {
-coord=$(grep 'NET REACTION COORDINATE UP TO THIS POINT' $1 | awk '{print $9}' \
-            | sed -n "$2,$2 p")
-}
-
 # main program
-# extract TS (input orientation)
-echo $NAtoms > $2
-echo 0.0000 >> $2
-grep -A $((2+$NAtoms)) 'Coordinates (Angstroms)' $1 | head -n $((3+$NAtoms)) \
-| tail -n $NAtoms | awk '{print $2,$4,$5,$6}' >> $2
-# extract IRC struc
-for ((i=1;i<=$TotalPoint;i++))
-do
-	Tmp_ini $1 $i
-	Tmp_fin $1 $i
-	Coord $1 $i
+function main(){
 
-	echo $NAtoms >> $2
-    echo $coord >> $2
-	sed -n "$tmp_ini , $tmp_fin p" $1 | grep -A $((2+$NAtoms)) 'Center     Atomic      Atomic             Coordinates (Angstroms)' \
-	| tail -n $NAtoms | awk '{print $2,$4,$5,$6}' >> $2
-done
+    # Step 0. Std-out instruction and check the status of input argument
+    checkArg $1 $2
+
+    # Step 1. Get variables of $NAtoms and $Totpts 
+    getNAtoms $1
+        NAtoms=$?
+    getTotPts $1 
+        TotPts=$? 
+    echo "Total amount of points (include TS) is : " $(($TotPts+1))
+
+    # Step 3. Get TS structure; output: TS.xyz 
+    getTS $1 $NAtoms 
+
+    # Step 4. Differentiate three IRC situations
+    #   1. Forward and Reverse; Path Number: 1 and 2
+    #   2. Forward only; Path Number: 1
+    #   3. Reverse only; Path Number: 1
+    getPathNum $1 
+        PathNum=$?
+    
+    # Step 5. 
+    if [ $PathNum == 2 ]
+    then
+        # 1. Forward and Reverse; Path Number: 1 and 2
+        splitLog $1  # output: Forward.dat and Reverse.dat 
+        extractStruc Forward.dat $NAtoms Forward.xyz
+        extractStruc Reverse.dat $NAtoms Reverse.xyz 
+        revStruc Reverse.xyz $NAtoms # output: Reverse.xyz 
+        cat Reverse.xyz > $2 
+        cat TS.xyz >> $2 
+        cat Forward.xyz >> $2 
+        rm -f Reverse.xyz TS.xyz Forward.xyz Forward.dat Reverse.dat 
+    else 
+        extractStruc $1 $NAtoms tmp.xyz 
+        cat TS.xyz > $2 
+        cat tmp.xyz >> $2 
+        rm -f TS.xyz tmp.xyz
+    fi 
+}
+
+function checkArg(){
+    # $1 = input G16 log file
+    # $2 = output xyz file
+    test -f $1 || echo $1 is not exist
+    [ "$1" == "" ] \
+        && echo "No input argument, please key-in the name of G09 file (e.g. *.log)" \
+        && exit
+    [ "$2" == "" ] \
+        && echo "No input argument, please assign the filename of output (e.g. *.xyz)" \
+        && exit
+    echo ''
+    echo "--- Program 'getIRCstruc' extracts all structures of"
+    echo "--- G16 output file; $1"
+    #name=$(echo $1 | sed 's/.log//')
+    echo ''
+    echo "Output data: $2"
+    echo ''
+}
+
+function getNAtoms(){
+    NAtoms=$(grep NAtoms $1 | grep -v MOERIx | tail -n 1 | awk '{print $2}')
+    return $NAtoms
+}
+
+function getTotPts(){
+    TotPts=$(grep -c 'NET REACTION COORDINATE UP TO THIS POINT' $1 )	
+    return $TotPts
+}
+
+function getTS(){
+    # $1 = *.log 
+    # $2 = NAtoms
+    # output: TS.xyz 
+
+    # extract TS and exclueds the first structure
+    NAtoms=$2
+    output='TS.xyz'
+    iniL=$(grep -n 'Point Number' $1 | head -n 1 | cut -d ':' -f 1 )
+    finL=$(grep -n 'Point Number' $1 | sed -n '2,2 p' | cut -d ':' -f 1 )
+    echo $NAtoms > $output
+    echo 0.0000 >> $output
+    sed -n "$iniL, $finL p" $1 \
+        | grep -A $((2+$NAtoms)) 'Coordinates (Angstroms)' \
+        | head -n $((3+$NAtoms)) \
+        | tail -n $NAtoms \
+        | awk '{print $2,$4,$5,$6}' >> $output
+}
+
+function getPathNum(){
+    # $1 = *.log 
+    PathNum=$(grep 'Path Number:' $1 | \
+        awk '{print $6}' | uniq | wc -l )
+    return $PathNum
+}
+
+function splitLog(){
+    # $1 = *.log 
+    midL=$(grep -n 'Path Number:   2' $1 | head -n 1 \
+        | cut -d ':' -f 1 )
+    endL=$(wc -l $1 | awk '{print $1}')
+    sed -n "1,$midL p" $1 > Forward.dat 
+    sed -n "$midL,$endL p" $1 > Reverse.dat 
+}
+
+function extractStruc(){
+    # $1 = *.log or splitted one 
+    # $2 = $NAtoms
+    # $3 = *.xyz 
+
+    path=$(grep 'Path Number:' $1 | awk '{print $6}' | uniq | wc -l )
+    if [ $path == 2 ]
+    then
+        # Forward 
+        grep -n 'Point Number:' $1 | sed '1d' \
+            | sed '$ d' | cut -d ':' -f 1 > iniL.dat 
+    else 
+        # Reverse 
+        grep -n 'Point Number:' $1 \
+            | cut -d ':' -f 1 > iniL.dat 
+    fi 
+    sed '1d' iniL.dat > finL.dat 
+    wc -l $1 | awk '{print $1}' >> finL.dat 
+
+    NAtoms=$2
+    Pts=$(wc -l iniL.dat | awk '{print $1}')
+    rm -f $3
+    for ((i=1;i<=$Pts;i++))
+    do
+        tmp_ini=$(sed -n "$i,$i p" iniL.dat )
+        tmp_fin=$(sed -n "$i,$i p" finL.dat )
+        coord=$(grep 'NET REACTION COORDINATE UP TO THIS POINT' $1 \
+            | awk '{print $9}' \
+            | sed -n "$i,$i p")
+
+        echo $NAtoms >> $3
+        echo $coord >> $3
+        sed -n "$tmp_ini , $tmp_fin p" $1 \
+            | grep -A $((2+$NAtoms)) 'Coordinates (Angstroms)' \
+            | tail -n $NAtoms | awk '{print $2,$4,$5,$6}' >> $3
+    done
+    rm -f iniL.dat finL.dat 
+}
+
+function revStruc(){
+    # $1 = *.xyz 
+    # $2 = $NAtoms 
+    NAtoms=$2 
+    jobL=$(( $NAtoms + 2 ))
+    totL=$(wc -l $1 | awk '{print $1}')
+    totPts=$(( $totL / $jobL ))
+    rm -f rev.xyz 
+    for ((i=$totPts;i>=1;i=i-1))
+    do 
+        head -n $(( $jobL * $i )) $1 | tail -n $jobL > tmp 
+        coord=$(sed -n '2,2 p' tmp )
+        echo $NAtoms >> rev.xyz 
+        echo -$coord >> rev.xyz 
+        tail -n $NAtoms tmp >> rev.xyz 
+    done 
+    mv -f rev.xyz $1
+    rm -f tmp 
+}
+
+main $@

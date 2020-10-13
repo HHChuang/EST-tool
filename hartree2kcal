@@ -11,7 +11,7 @@
 # 2016/09/15, Grace, 1st. ver.
 # 2016/11/16, Grace, 2nd. ver. 
 # 2017/04/28, Grace, 3rd. ver.
-
+# 2017/12/28, Grace, tmp. ver. close stdin
 # Step 0. Check the existance of input file
 [ "$1" == "" ] && echo 'No 1st. input argument, stop the program.' && exit
 [ -f "$1" ] || echo "$1 is not exist" 
@@ -20,16 +20,16 @@
 # Step 1. Get the number of grid points
 #		  Get the number of state
 num_pts=$(wc $1|awk '{print $1}')
-num_column=$(awk -F ' ' 'NR==2{print NF}' $1)
-	# fix bug, 2016/09/09, Grace. if the first row is not completed
-	
+num_column=$(cat $1 | sort -n -k 2 | head -n 1 | awk '{FS = " "} ; {print NF}')
+	# fix bug, 2017/11/27, Grace. remove fail jobs
 num_state=$(($num_column-1))
 # Step 2. Decide the energy reference, and then change the energy unit 
 #		  from Hartree to kcal/mol
 read -p 'Use the smallest energy as the reference (yes/no): ' judge
+#judge='yes'
 case $judge in 
 	"yes") # smallest one as ref.
-		ref=$(awk '{print $2}' $1|sort -n -k 2 | tail -n 1)
+		ref=$(awk '{print $2}' $1|sed '/^$/d' | sort -nr  | tail -n 1)
 	;;
 	"no")
 		read -p 'Key-in the energy of reference: ' ref
