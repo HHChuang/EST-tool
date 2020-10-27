@@ -1,0 +1,72 @@
+#!/bin/bash
+#########################################################################
+# Program: Check Molpro output, and grep energy for gnuplot.            #
+#                                                                       #
+# History:                                                              #
+#   2020/10/16, Grace, grep energy for gnuplot 2D ploting. Now, it can  #
+#                      only grep CAS simulation.                        #
+#                                                                       #
+#########################################################################
+
+ls | grep inp | sed 's/.inp//g'| sed 's/_/ /g' \
+	| sort -n -k 1 -k 2 | awk '{print $1"_"$2}' > list  
+
+rm -f work.dat fail.dat 
+touch work.dat 
+touch fail.dat
+for name in `cat list`
+do 
+	if [ -f $name.out ] 
+	then 
+		status=$(grep 'Molpro calculation terminated' $name.out | tail -n 1 | grep -v warning | nl | awk '{print $1}' )
+		if [ -z $status ] 
+		then 
+			echo $name >> fail.dat
+		else
+            if [ $status == 0 ] || [ $status == '' ]
+            then 
+                echo $name >> fail.dat 
+            else 
+			    echo $name >> work.dat 
+            fi
+		fi
+	fi
+done 
+
+echo '# of total grid: ' `wc -l list`
+echo '# of worked pts: ' `wc -l work.dat`
+echo '# of failed pts: ' `wc -l fail.dat` 
+
+rm -f list E.dat 
+
+for name in `cat work.dat`
+do 
+	#E=$(grep 'CASSCF/aug-cc-pVTZ//CASSCF/aug-cc-pVTZ' $name.out | awk '{print $3}')
+	E=$(grep 'CASSCF/aug-cc-pVTZ' $name.out | awk '{print $3}')
+	# echo $name $E
+	echo $name $E >> E.dat 
+done 
+
+# add blank lines for gnuplot plot format
+sed 's/_/ /g' E.dat > tmp.dat  
+nline=$(wc -l tmp.dat|awk '{print $1}' )
+x0=$(sed '1,1 p' tmp.dat | awk '{print $1}')
+rm -f E.dat 
+for ((i=1;i<=$nline;i++))
+do 
+	x=$(sed -n "$i,$i p" tmp.dat | awk '{print $1}')
+	y=$(sed -n "$i,$i p" tmp.dat | awk '{print $2}')
+	e=$(sed -n "$i,$i p" tmp.dat | awk '{print $3}')
+	if [ "$x" != "$x0" ]
+	then 
+		echo '' >> E.dat 
+		x0=$x
+	fi
+	echo "$x $y $e" >> E.dat
+done
+echo '' >> E.dat
+rm -f tmp.dat 
+
+echo ''
+echo 'Output for 2D gnuplot: E.dat' 
+echo ''

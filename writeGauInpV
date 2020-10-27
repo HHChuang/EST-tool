@@ -6,6 +6,7 @@
 #	Input :															#
 #			$1 = test.txt ; store a series of structure				#
 #			$2 = header.txt ; info. of $rem							#
+#           $3 = ecp                                                #
 #	Output :														#
 #			lots of *.com											#
 #                                                                   #
@@ -20,21 +21,25 @@
 [ "$2" == "" ] && echo "file $1 is not exist, exit" && exit
 
 natom=$(head -n 1 $1)
+natom_2=$(($natom+2))
 fileLine=$(wc -l $1 | awk '{print $1}')
 nfile=$(( $fileLine/($natom+2) ))
 
 read -p 'Please key-in the charge: ' charge
 read -p 'Please key-in the multiplicity: ' multi
 
-for ((i=1;i<=$nfile;i=i+1))
+for (( i=1;i<=$nfile;i++))
 do
-	head -n $((($natom+2)*$i)) $1 | tail -n $(($natom+2)) > tmp.txt
+	head -n $(( $natom_2*$i )) $1 | tail -n $natom_2 > tmp.txt
 	name=$(sed -n '2,2 p' tmp.txt)
+    
 	if [ `echo $name | grep -c \-` = 1 ]
 	then
 		name=n$name
 	fi
-	name=$(echo $name | sed 's/ //g')
+	
+    name=$(echo $name | sed 's/ //g')
+
 cat << EOF > "${name}".com 
 `cat $2` 
 
@@ -43,12 +48,13 @@ scan potential
 $charge $multi
 `tail -n $natom tmp.txt`
 
-`if [ -f $3 ] 
-then 
-    cat $3
-fi`
-
 EOF
+
+# if [ -f $3 ] 
+# then 
+#     cat $3 >> "$name".com 
+# fi
+
 done
 
 rm -f tmp.txt

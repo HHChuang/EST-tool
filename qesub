@@ -1,0 +1,634 @@
+#!/bin/bash
+#################################################################################
+# Program :								   									    #
+#	Create SGE file(s) to submit electronic structure input file(s), where      #
+#   three electronic structure theory (EST) programs are used which are         #
+#   GAUSSIAN16, Q-Chem 5.3 and Molpro 2019.2.                                   # 
+#                                                                               #
+#   Four classifications of jobs are provided:                                  #
+#   1. submit one selected single input files                                   #
+#   2. submit all the input files in the same folder                            #
+#   3. submit input files if the previous calculation failed                    #
+#   4. submit selected input files which are list in a file name '*.dat'        #
+#                                                                               #
+# Output:								   									    #
+#	*.sge (configuration of SGE)					   							#
+#                                                                               #
+# History:                                                                      #
+# 2015/04/15, Grace, revised IAMS script.                                       #
+# 2015/11/16, Grace, test version, change PBS system into SGE system.           #
+# 2015/11/26, Grace, split jobs into several sge files.                         #
+# 2016/11/11, Grace, change output extension to .log.                           #
+# 2019/04/20, Grace, change to gaussian 16, and modify the structure of code.   #   
+# 2020/07/08, Grace, add if condition in the 3rd step in the main function.	    #
+# 2020/08/12, Grace, add the third modes; submit selected jobs.				    #
+# 2020/08/17, Grace, five modes completed.                                      #
+# 2020/09/25, Grace, name of SGE file cannot start from digit.                  #
+# 2020/10/13, Grace, 1. merge 'qcsub' which was written by Wesley You in 2012.  #
+#                    2. merge qsubGau, qsubQch and qsubMol into qesub.          #
+#                                                                               #
+#################################################################################
+
+# Main program
+function main(){
+    # 0. global variables setting 
+        USAGE='Usage: qesub [ -save ] [ -np procs | -nt threads ] infile [ runname ]'
+
+        inp_ext='com'
+        out_ext='log'
+        debug=''
+        threads=1
+        pe='hydra'
+        nodelist='*'
+        tag=''
+        est='qchem' #default EST program, $est= qchem, g16, molpro
+
+        # global=''
+        # vib=''
+        # queue='all.q'
+        # resource=''
+        
+        # m_options='n'
+        # m_list=$USER
+
+    # 1. check the input arguments
+        # output variable: $checkArg (1-5)
+        #   '1' = single job; $input=name of input file
+        #   '2' = all jobs
+        #   '3' = fail jobs 
+        #   '4' = selected jobs in a list
+        checkArg $@ 
+    
+    # 2. check and count EST input files into a list
+        # output: list.dat 
+        genlist $checkArg $input 
+    
+    # 3. user defined: select the amount of nodes; output variable: $getNnode
+        getNnode list.dat 
+
+    # 4. generate the header of submitted files
+        genSGEfile $getNnode list.dat # output: SGElist.dat 
+
+    # 5. submit jobs
+        # for name in `cat SGElist.dat`
+        # do 
+        #     qsub -pe serial 4 $name 
+        # done 
+        # rm -f SGElist.dat 
+}
+
+function checkArg()
+{
+    # 2020/10/23, Grace, merge the functions from qcsub 
+    # $@ = input command-line arguments
+
+    until [ $# -eq 0 ]
+    do 
+        case $1 in 
+        '-e')
+            est=$2
+            shift 2
+        ;;
+        '-save')
+            debug='-save'
+            shift
+        ;;
+        '-np') 
+            # 1. grep the number of processor 
+                prcs=$2
+            # 2. check the condition of $proc
+                if [ `echo $prcs | grep -c '[a-zA-Z]'` == 1 ]
+                then 
+                    echo "The argument should be numbers. Your input $prcs is wrong."
+                    showUSAGE
+                fi 
+                if [ "$prcs" -le 1 ]
+                then 
+                    unset prcs
+                fi 
+                #FIXME: how to check the current amount of processors
+                # if [$prcs > 4 && `qconf -su xlab | grep -c $USER` == 1]
+                # then 
+                #     prcs=4
+                #     echo "Your parallel CPUs are limited to $prcs"
+                #     showUSAGE
+                # fi
+                echo "This is a parallel run on $prcs processors"
+                shift 2
+        ;;
+        '-nt')
+            threads=$2
+            if [ `echo $threads | grep -c '[a-zA-Z]'` == 1 ]
+            then 
+                echo "The argument should be numbers. Your input $threads is wrong."
+                showUSAGE
+            fi 
+            echo "This is a serial run on $threads threads"
+            shift 2
+        ;;
+        '-pe') 
+            pe=$2
+            shift 2
+        ;;
+        '-q')
+            nodelist=$2
+            shift 2
+        ;;
+        '-v') #TODO: assign program verison 
+            tag=$2
+            shift 2
+        ;;
+        *)
+            # assign $checkArg which corresponds to differenct submited modes. 
+            #   1. single job
+            #   2. all jobs
+            #   3. fail jobs 
+            #   4. selected jobs in a list
+
+            # 2020/10/26, Grace, file extension for $inp_ext/$out_ext: com/log or /inp/out  
+            check_file_extension $inp_ext 
+
+            input=$1
+            case $input in 
+            'all') # mode 2
+                testall=$( ls | grep -c $inp_ext )
+                if [ "$testall" == 0 ] 
+                then 
+                    echo "No EST input file; fail at checkArg() at line $LINENO. Stop program." 
+                    showUSAGE
+                fi 
+                checkArg='2'
+            ;;
+            'fail') # mode 3
+                checkArg='3'
+            ;;
+            `echo $1|grep .dat`) # mode 4
+                if [ -f $input ]
+                then
+                    if [ ! -s $input ]
+                    then
+                        echo "$input is an empry file; fail at checkArg() at line $LINENO. Stop script."
+                        showUSAGE
+                    fi 
+                else 
+                    echo "$input is not exist; fail at checkArg() at line $LINENO. Stop program."
+                    showUSAGE
+                fi 
+                checkArg='4'
+            ;;
+            *) # mode 1
+                checkArg='1'
+            ;;
+            esac
+            shift
+        ;;
+        esac
+    done  
+
+    if [ "$input" == '' ]
+    then 
+        echo "No input file; fail at checkArg() at line $LINENO. Stop program."
+        showIllustration
+    fi
+}
+
+function check_file_extension()
+{
+    # $1 = extension of input file name 
+    if [ `ls | cut -d '.' -f 2 | grep -c $1` -eq 0 ] 
+    then 
+        inp_ext='inp'
+        out_ext='out'
+    fi  
+}
+
+function genlist()
+{
+    #   $1 = $checkArg  
+    #       if $1 = 1, then $2 = name of input file, 
+    #       if $1 = 4, then $2 = list of input file, 
+    #       else, ignore $2. 
+
+    case "$1" in 
+    '1') # single job
+        echo $2 | cut -d '.' -f 1 > list.dat 
+    ;;
+    '2') # all jobs
+        ls | grep $inp_ext  | cut -d '.' -f 1 > list.dat
+    ;;
+    '3') # failed jobs
+        ls | grep $out_ext | cut -d '.' -f 1 > alljobs.dat 
+        rm -f list.dat 
+        touch list.dat 
+        # extract failed jobs by check the last part of output files
+        for name in `cat alljobs.dat`
+        do 
+            case "$est" in
+            'qchem')
+                num=$(grep -c 'Thank you very much for using Q-Chem.  Have a nice day.' $name.$out_ext)
+            ;;
+            'g16')
+                num=$(grep -c 'Normal termination of Gaussian' $name.$out_ext )
+            ;;
+            'molpro')
+                num=$(grep -c 'Molpro calculation terminated' $name.$out_ext)
+            ;;
+            esac 
+            if [ "$num" -eq 0 ]
+            then 
+                echo $name >> list.dat 
+            fi
+        done 
+
+        if [ ! -s list.dat ]
+        then
+            echo "No failed jobs in the current folder; fail at line $LINENO."
+            echo 'Please change mode. Stop program.'
+            showUSAGE
+        fi 
+        rm -f alljobs.dat 
+    ;;
+    '4') # selected jobs in a list
+        listfile=$2
+        num=$(grep -c $inp_ext $listfile) # with file extension
+        # num=$(wc -l $listfile | awk '{print $1}') # without file extension
+        if [ "$num" -gt 0 ]
+        then 
+            cat $listfile | cut -d '.' -f 1 > tmplist.dat 
+            mv -f tmplist.dat list.dat 
+        else 
+            echo "Wrong format in the $listfile; fail at line $LINENO. Stop program."
+            showUSAGE
+        fi 
+    ;;
+    esac 
+}
+
+function getNnode()
+{
+    # $1 = list.dat 
+    njobs=$(wc -l $1 | awk '{print $1}')
+    if [ $njobs -eq 1 ]
+    then
+        getNnode='1'
+    else
+        echo '--------------------------------------------------------'
+        echo "Amount of jobs: $njobs"
+        echo ''
+        read -p 'How many nodes do you want? ' getNnode
+        echo '--------------------------------------------------------'
+        if [ $getNnode -gt $njobs ] 
+        then 
+            echo "Amount of nodes ($getNnode) is larger than jobs ($njobs)."
+            echo "Fail at getNnode() at line $LINENO. Stop program." 
+            showUSAGE
+        fi
+    fi
+}
+
+function genSGEfile()
+{
+    # $1 = nNode
+    # $2 = list.dat 
+
+    nNode=$1
+    njobs=$(wc -l $2 | awk '{print $1}')
+    jobname=( `cat $2` )
+    [ $checkArg -ne 4 ] && rm -f list.dat 
+
+    if [ $njobs -eq 1 ] 
+    then 
+        #initial setting: SGE name = file name 
+        sgename=$jobname
+
+        # change SGE filename 
+        #   1. if the original one exists
+        #   2. if it starts with a digit
+        check_sgename=$(checkSGEfilename $sgename) 
+        
+        SGEheader $check_sgename        # output: $check_filename.sge 
+        SGEbody $check_sgename          # output: $check_filename.sge 
+        SGEfoot $check_sgename $jobname # output: $check_filename.sge 
+        echo $check_sgename\.sge > SGElist.dat 
+    else
+        quotient=$(( $njobs/$nNode ))
+        remainder=$(( $njobs%$nNode ))
+        # sgelist=(Vodka Whiskey Brandy Vermouth Cognac Beer PortWine Rum Gin)
+        sgelist=(WagakkiBand SuzuhanaYuko Machiya NinagawaBeni IbukuroKiyoshi Asa KaminagaDaisuke Wasabi Kurona)
+        
+        rm -f SGElist.dat 
+        ini_job=0
+        for ((Node_i=1;Node_i<=$nNode;Node_i++))
+        do 
+            sgename=${sgelist[$(( $RANDOM%9 ))]}
+            check_sgename=$(checkSGEfilename $sgename) 
+            SGEheader $check_sgename    # output: $check_filename.sge 
+            SGEbody $check_sgename      # output: $check_filename.sge 
+            
+            # allocate amount of input files in one SGE file
+            if [ "$remainder" -eq 0 ]
+            then 
+                joblen=$quotient
+            else
+                if [ "$Node_i" -le $remainder ]
+                then
+                    joblen=$(( $quotient + 1 ))
+                else 
+                    joblen=$quotient
+                fi 
+            fi 
+            part_jobname=${jobname[@]:$ini_job:$joblen}
+            ini_job=$(( $ini_job + $joblen ))
+            
+            SGEfoot $check_sgename $part_jobname
+            echo $check_sgename\.sge >> SGElist.dat 
+        done 
+    fi  
+}
+
+function checkSGEfilename()
+{
+    # $1 = $filename 
+
+    #   1. if the original one exists
+    nSameSGE=$( ls | grep "$1" | grep -c 'sge$' ) 
+    if [ "$nSameSGE" == 0 ]
+    then
+        name=$(echo $1)
+    else 
+        name=$(echo $1\_$nSameSGE) 
+    fi 
+
+    #   2. if it starts with a digit
+    digitName=$(echo $name | grep ^[0-9] )
+    if [ -z "$digitName" ]
+    then
+        echo $1
+    else 
+        # add prefix 'job' since SGE file cannot starts with a digit
+        echo job$1 
+    fi
+}
+
+function SGEheader()
+{
+    # $1 = $filename
+cat << EOF > $1.sge
+#!/bin/bash
+#####################################################################
+#  Program :                                                        #
+#       Submit the EST job(s) through SGE(sun grid engine) system.  #
+#####################################################################
+# Grace, d02223134@g.ntu.edu.tw
+
+### SGE Environment
+#$ -S /bin/sh -w w   	        ### Run job through bash shell
+#$ -j y							### Join stdout and stderr
+#$ -l hostname=$nodelist		### Resource control"
+EOF
+
+if [ ! -z ${prcs+x} ] 
+then 
+    echo "#$ -pe $pe $prcs" >> $1.sge
+fi 
+
+cat << EOF >> $1.sge
+#$ -cwd							### Use current working directory
+
+echo "Working directory is \$SGE_O_WORKDIR"
+cd \$SGE_O_WORKDIR
+
+echo 'Job starts'
+echo "    Host: \$HOSTNAME"
+echo '    Date:' `date`
+echo 'Directory:' `pwd` 
+
+EOF
+}
+
+function SGEbody()
+{
+    # $1 = $filename
+    case $est in 
+    'qchem')
+cat << EOF >> $1.sge
+### QChem Setup 
+export QC=/work/qchem/trunk/developer/$USER/qchem_531
+export QCEXE=/work/qchem/trunk/developer/$USER/qchem_531/build/qcprog.exe
+export QCAUX=/work/qchem/trunk/developer/qchem_common/qcaux
+export QCSCRATCH=/scratch/$USER/qchem 
+export QCLOCALSCR=/scratch/$USER/qclocal
+
+echo ''
+echo == Q-CHEM Environment ==
+echo qchem bindir is \$QC
+test ! -d \$QCLOCALSCR && make -p \$QCLOCALSCR
+echo qchem local scratch is \$QCLOCALSCR
+test ! -d \$QCSCRATCH && make -p \$QCSCRATCH
+echo qchem scratch is \$QCSCRATCH
+
+export PATH=$PATH:/opt/util
+EOF
+    ;;
+    'g16')
+cat << EOF >> $1.sge
+### G16 Setup 
+export g16root=/opt
+export GAUSS_EXEDIR=\$g16root/g16
+export GAUSS_SCRDIR=/scratch/$USER/g03
+export LD_LIBRARY_PATH=/opt/gcc-8.2.0/lib64:$LD_LIBRARY_PATH:\$g16root/g16:\$g16root/g16/bsd
+export PATH=$PATH:\$GAUSS_EXEDIR:\$g16root/g16/bsd
+
+echo g16root is \$g16root
+echo g16 scratch is \$GAUSS_SCRDIR
+EOF
+    ;;
+    'molpro')
+cat << EOF >> $1.sge
+### Molpro Setup 
+export MOLPRO_EXEDIR=/opt/molpro/molpro_2019_2_linux_x86_64_i8/bin
+export MOLPRO_EXE=\$MOLPRO_EXEDIR/molpro
+export PATH=\$MOLPRO_EXEDIR:$PATH
+EOF
+    ;;
+    *)
+        echo 'Wrong option while selecting EST program.'
+        showUSAGE
+    ;;
+    esac
+
+    echo '' >> $1.sge
+    echo '### Job Srtipt' >> $1.sge
+    echo 'echo "Your job(s):" ' >> $1.sge 
+}
+
+function SGEfoot()
+{
+    # $1 = SGE filename 
+    # $2 = array of jobname
+    selected_jobname=(`echo $@`)
+    sgefile=${selected_jobname[0]}
+
+    case $est in 
+    'qchem')
+        for ((i=1;i<${#selected_jobname[@]};i++))
+    do 
+        echo "time \$QCEXE ${selected_jobname[$i]}.$inp_ext scratch >& ${selected_jobname[$i]}.$out_ext " >> $sgefile\.sge 
+    done 
+    ;;
+    'g16')
+        for ((i=1;i<${#selected_jobname[@]};i++))
+        do 
+            echo "time g16  < ${selected_jobname[$i]}.$inp_ext  > ${selected_jobname[$i]}.$out_ext" >> $sgefile\.sge 
+        done 
+    ;;
+    'molpro')
+    for ((i=1;i<${#selected_jobname[@]};i++))
+    do 
+        echo "time \$MOLPRO_EXE  -W \$SGE_O_WORKDIR  < ${selected_jobname[$i]}.$inp_ext  > ${selected_jobname[$i]}.$out_ext" >> $sgefile\.sge 
+    done 
+    ;;
+    esac
+}
+
+function showUSAGE()
+{
+    echo $USAGE
+    exit
+}
+
+
+function showIllustration()
+{
+    echo $USAGE
+    read -r -s -p $'Press enter to continue...\n' 
+    /usr/bin/perl -x $0
+    exit 
+}
+
+################
+main $@
+################
+
+exit
+# showIllustration 
+
+# ====================== perl script start =========================
+#!/usr/bin/perl 
+
+use strict;
+use Pod::Usage;
+# print man page and exit if requested.
+pod2usage(-exitstatus => 0, -verbose => 2);
+
+# embedded documentation.
+
+__END__
+
+=head1 NAME
+
+qesub - submit job(s) relating to elctronic structure theory (EST) program to SGE queuing system. 
+
+=head1 SYNOPSIS
+
+I<qesub> [ options ] I<infile> 
+
+=head2 Infile:
+
+Four modes are provided:
+
+=over 5
+
+=item 1. I<$infile> = B<filename>; submit single job
+
+=item 2. I<$infile> = 'B<all>'; submit all jobs in the current folder
+
+=item 3. I<$infile> = 'B<fail>'; submit failed jobs
+
+=item 4. I<$infile> = B<*.dat>; submit selected jobs in a list
+
+=back
+
+=head2 Options:
+
+=head3 B<EST related:>
+
+=over 8
+
+=item -e [B<qchem|g16|molpro>]      assign EST program 
+
+=item -save [B<runname>]    save temporary files to I<$QCSCRATCH> 
+
+In a Q-CHEM job, I<$QCSCRATCH> is a place to store temporary files during the computation. Those files will be removed at the end of job except for the options B<-save> or B<runname> to be set. In default, I<$QCSCRATCH> is set on a local disk. Currently it is C</scratch/$USER/qchem>. 
+
+=back
+
+=head3 B<SGE related:>
+
+=over 8
+
+=item -np B<procs>  invoke a parallel job with B<procs> cpus.
+
+Set one number or a set of numbers of slots used for a parallel qchem job. The default is to run a serial qchem job. This value can be an integer or a set of integers, e.g I<-np 1,2,4> which allows SGE to schedule available number of slots. The recommended number of cpus is I<4>.
+
+=item -nt B<threads>	invoke a multi-trhead job with B<threads> cpus (for CC calc.) 
+
+=item -pe B<pe_name>	specify the parallel environment.
+
+=item -q B<nodelist>	specify the B<nodelist>B where you want to run the job.
+
+Here I<nodelist> can be a single hostname as I<q1> or a hostlist where the
+string is used for regular boolean expression matching. eg.
+I<'q41|q42'>, I<'q4[1-6]'> or I<'q4*|q5*'>.
+
+=back
+
+=head1 EXAMPLES
+
+ Submit a Q-Chem job; by default, assign EST program as Q-Chem: 
+ ]$ qesub qchem.inp 
+ ]$ qesub -e qchem qchem.inp 
+
+ Submit a Gaussian job: 
+ ]$ qesub -e g16 gaussian.com 
+
+ Submit a Molpro job:
+ ]$ qesub -e molpro molpro.inp 
+
+ Submit all the jobs in the current directory: 
+ ]$ qesub all 
+
+ Submit the jobs which have failed simulation in their output files in the current directory: 
+ ]$ qesub fail 
+
+ Submit a list of jobs: 
+ ]$ qesub *.dat 
+ *.dat can be any filename with extension of .dat, e.g. *.dat = list.dat 
+
+ Submit a 4-cpu EST job:
+ ]$ qesub -np 4 *.inp 
+
+ Submit a EST job on q14 with tunable number of slots:
+ ]$ qesub -q q14 -np 1,2,4,8 *.inp 
+
+=head1 VERSION
+
+=over 8
+
+=item v1 : 2012-11-25
+
+=item v2 : 2020-10-27
+
+=back 
+
+=head1 AUTHOR
+
+=over 8
+
+=item 2012 - Wesley You <zqyou.sinica@gmail.com>
+
+=item 2020 - Hsiao-Han (Grace) Chuang <d02223134@g.ntu.edu.tw>
+
+=back 
+
+=cut
