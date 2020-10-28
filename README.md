@@ -1,5 +1,5 @@
 # Purpose
-   Tools for electronic structure theory (EST) calculation (e.g. Gaussian, QChem). 
+   Tools for electronic structure theory (EST) calculation (e.g. Gaussian, QChem or Molpro). 
    
 ## Programming Language : 
 - Fortran
@@ -31,13 +31,22 @@
 
 ## 4. Instruction of each program
 1. **Bash shell script**
-   - `qsubGau` - 2015/10/13,Grace
-		- Create the submitted file of GAUSSIAN09 input file in blackberry server.
-		- Benchmark/one-file mode
-   - `checkGau` - 2016/11/04,Grace
-		- Check the status of G09 output file
-		- Benchmark/one-file mode
-		- $1=file or document
+   - `calcIRCvec`: Create a serious of vectors
+   - `checkGau`: Check the status of Gaussian16 output file
+   - `checkMol`: Check the status of Molpro output file
+   - `checkQch`: Check the status of Q-Chem output file
+   - `getCoord`: Extract the optimized coordinate from a Gaussian/QChem output file 
+   - `getIRCcurve`: Extract IRC energy curve explicitly form G09 IRC output file
+   - `getIRCstruc`: Extract a serious of structures form G09 IRC output file
+   - `getNM`: Extract the normal mode eigenvector	from Gaussian/QChem job	
+   
+   - `getSPE` - 2015/10/22,Grace
+	   - Extract the SP energy from g09 output *.out
+   - `qesub`: Create the configuration file of EST jobs for SGE queuing system 
+      - $1=file
+   - `getMO` - 2016/04/13,Grace
+      - Extract the MO information and then use Jmol to visualize
+      - $1=qchem output file
 	- `getGauCoord` - 2016/10/24,Grace
 		- Extract the optimized coordinate of G09 output file
 		- $1=G09 output
@@ -45,36 +54,13 @@
 		- Extract the job name and directory of the running jobs
 	- `cpSelectJob` - 2015/11/24,Grace
 		- Copy select jobs to assign path         - $1=select list, $2=assign path
-	- `checkInOut` - 2016/01/20,Grace
-		- Extract the un-submitted jobs by comparing the input and output list
    - `writeGauInp` - 2015/11/30,Grace
 		- Extract the coordinate and then write the input file for Gaussian program.
       - $1=header.txt, *.out
-   - `getSPE` - 2015/10/22,Grace
-	   - Extract the SP energy from g09 output *.out
-   - `checkQchem` - 2016/11/04,Grace
-      - Check the status of QChem output file
-      - Benchmark/one-file mode
-      - $1=file or document
-   - `getQchemCoord` - 2016/04/12,Grace
-      - Extract the optimized coordinate from a QChem output file
-      - $1=file
-   - `getMO` - 2016/04/13,Grace
-      - Extract the MO information and then use Jmol to visualize
-      - $1=qchem output file
    - `qchem2gau` - 2016/04/14,Grace
       - Extract the structure from QChem to gaussian format input file              
       - $1=qchem input
       - $2=header file
-   - `getQchemPES_SF-CIS` - 2016/04/18,Grace
-      - Extract the energy of PES from QChem output
-   - `getFCD` - 2016/05/02,Grace
-      - Extract the matrix element from the FCD calculation
-   - `plotAmpl` - 2016/06/30,Grace
-      - Extract the amplitude form SF-CIS calculation and plot it	
-   - `getOneRas` - 2016/08/19,Grace
-      - Extract energy of several states of RAS-nSF calculation
-      - $1=onefile.txt
 2. Fortran
    - `AddWDir` - 2015/10/17,Grace
       - Approximate the H-Bond is linear, and then construct the H-Bond network (1st shell) input files	

@@ -38,7 +38,7 @@ function main(){
         out_ext='log'
         debug=''
         threads=1
-        pe='hydra'
+        pe='hydra' # default for parallel 
         nodelist='*'
         tag=''
         est='qchem' #default EST program, $est= qchem, g16, molpro
@@ -70,11 +70,11 @@ function main(){
         genSGEfile $getNnode list.dat # output: SGElist.dat 
 
     # 5. submit jobs
-        # for name in `cat SGElist.dat`
-        # do 
-        #     qsub -pe serial 4 $name 
-        # done 
-        # rm -f SGElist.dat 
+        for name in `cat SGElist.dat`
+        do 
+            qsub $name 
+        done 
+        rm -f SGElist.dat 
 }
 
 function checkArg()
@@ -134,7 +134,7 @@ function checkArg()
             nodelist=$2
             shift 2
         ;;
-        '-v') #TODO: assign program verison 
+        '-v') 
             tag=$2
             shift 2
         ;;
@@ -410,11 +410,12 @@ function SGEbody()
 {
     # $1 = $filename
     case $est in 
-    'qchem')
+    'qchem') #FIXME: Environment may have problems
 cat << EOF >> $1.sge
 ### QChem Setup 
 export QC=/work/qchem/trunk/developer/$USER/qchem_531
-export QCEXE=/work/qchem/trunk/developer/$USER/qchem_531/build/qcprog.exe
+# export QCEXE=/work/qchem/trunk/developer/$USER/qchem_531/build/qcprog.exe
+export QCEXE=/opt/qchem/cvs/exe/qcprog.exe.$tag
 export QCAUX=/work/qchem/trunk/developer/qchem_common/qcaux
 export QCSCRATCH=/scratch/$USER/qchem 
 export QCLOCALSCR=/scratch/$USER/qclocal
