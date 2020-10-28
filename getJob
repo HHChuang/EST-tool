@@ -1,0 +1,31 @@
+#!/bin/bash 
+
+#############################################################################
+#	Program :																#
+#			Get the directory of running jobs								#
+#############################################################################
+
+#2015/10/13, Grace, first version
+
+qstat -u $USER | grep -v dr  > qme.txt
+line=$(nl qme.txt| tail -n 1 | awk '{print $1}')
+Line=$(($line-2))
+tail -n $Line qme.txt|  awk '{print $1}' > jobID.txt
+
+printf  '%-2s %-8s %-15s %-50s\n' \
+		$(echo '#	Job_ID	Job_Name	Job_Directory')
+
+for ((i=1 ; i<=$Line ; i=i+1))
+do 
+	jobID=$(head -n $i jobID.txt| tail -n 1)
+	jobDir=$(qstat -j $jobID | grep cwd| awk '{print $2}')
+    jobName=$(qstat -j $jobID | grep job_name| awk '{print $2}' \
+			| sed 's/g09sub_//g')
+	jobSubTime=$(qstat -j $jobID | grep submission_time| awk '{print $2}')
+	############## Print out the information ####################
+	printf  '%-2i %-8i %-15s %-50s\n' \
+				$(echo "$i	$jobID	$jobName	$jobDir")
+	#############################################################
+done
+
+rm -f jobID.txt qme.txt
