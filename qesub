@@ -449,6 +449,22 @@ cat << EOF >> $1.sge
 ### Molpro Setup 
 export MOLPRO_EXEDIR=/opt/molpro/molpro_2019_2_linux_x86_64_i8/bin
 export MOLPRO_EXE=\$MOLPRO_EXEDIR/molpro
+export MOLSCRATCH=/scratch/$USER/molpro
+
+#FIXME: write a if condition, test for the du ? 2020/11/17, Grace
+if [ -d \$MOLSCRATCH ] then 
+    MOLSCRATCH=/scratch/$USER/molpro1
+    if [ -d \$MOLSCRATCH ] then 
+        rm -rf \$MOLSCRATCH
+        mkdir -f \$MOLSCRATCH
+    fi 
+fi 
+test ! -d \$MOLSCRATCH && make -p \$MOLSCRATCH
+echo Molpro local scratch is \$MOLSCRATCH
+test ! -d \$QCSCRATCH && make -p \$QCSCRATCH
+echo qchem scratch is \$QCSCRATCH
+
+
 export PATH=\$MOLPRO_EXEDIR:$PATH
 EOF
     ;;
