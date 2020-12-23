@@ -1,108 +1,135 @@
 #!/bin/bash
 #####################################################################
-#Program :						      						  		#
+# Program :						      						  		#
 #	Extract the optimized coordinate from a Gaussian/QChem      	#
 #	output file.					      					  		#
-#Input: 					    	       					  		#	
+#                                                                   #
+# Input: 					    	       					  		#	
 #	$1=test; Gaussian/QChem output file                     	    #
-#Output: 						      						  		#
+#                                                                   #
+# Output: 						      						  		#
 #	1. Std out						      						  	#
-#	2. *.xyz; user defined (can be used in Jmol)					#
+#	2. $(name).xyz and $(name).zmat		                            #
+#      $(name): user-defined outfile name                           #
+#                                                                   #
+# History:                                                          #
+# 2012/04/22, Grace, 1st. ver.                                      #
+# 2016/10/24, Grace, 2nd. ver.                                      #
+# 2017/10/23, Grace, 3nd. ver. combine Gaussian and QChem           #
+# 2019/03/22, Grace, 4th. ver. grep post-HF energy in Gaussian part #
+# 2020/12/17, Grace, add function to extract zmatrix of G16 output; #
+#             bug from gview: when I save file as zmatrix, it will  #
+#             reorder atom list by default in its GUI.              #
 #####################################################################
 
-# 2012/04/22, Grace, 1st. ver.
-# 2016/10/24, Grace, 2nd. ver.
-# 2017/10/23, Grace, 3nd. ver. combine Gaussian and QChem
-# 2019/03/22, Grace, 4th. ver. grep post-HF energy in Gaussian part
 
-#Step0. check the status of input file
-[ "$1" == "" ] && \
-echo 'No 1st. arg., you must key-in the name of G09/QChem output file' \
-&& exit
-GorQ=$(grep ' Gaussian, Inc' $1 | tail -n 1)
-if [ "$GorQ" == "" ] ; then
-    GorQ=$(grep 'Q-Chem' $1 | tail -n 1)
-    [ "$GorQ" == "" ] && echo 'Unknown job type, exit.' && exit
-    GorQ=false # this is a QChem job
-    echo 'This is a QChem output'
-else
-    GorQ=true # this is a Gaussian job
-    echo 'This is a Gaussian output'
-fi
-# if [ $GorQ ] ; then
-#     judge=$(grep 'Stationary point found' $1)
-# else
-#     judge=$(grep 'OPTIMIZATION CONVERGED' $1)
-# fi
-# [ "$judge" == "" ] && echo 'Not optimized successfully' && exit
-[ "$2" == "" ] && \
-echo 'No 2nd. arg., please name an output file to store the rawdata' \
-&& exit
+function main(){
+    #Step0. check the status of input file
+    checkInp $@
+    GorQ=$checkInp
 
-#Step1. extract the coordinate
-rm -f coord.tmp
-if [ "$GorQ" = true ]; then 
-    # Gaussian
-    num=$(grep -w 'NAtoms' $1 | head -n 1 | awk '{print $2}' )
-	
-    grep -A $(($num+4)) 'Input orientation:' $1 | tail -n $num | \
-    #grep -A $(($num+4)) 'Standard orientation:' $1 | tail -n $num | \
-	#grep -A $(($num+4)) 'Z-Matrix orientation:' $1 | tail -n $num | \
-		awk '{print $2 "\t" $4 "\t" $5 "\t" $6}' > coord.tmp
-    cat coord.tmp > $2
-	
-        #The keyword for MP2 is 'EUMP2',and for CCSD is 'CORR'. Others
-        #are 'SCF Done'.
-        method=$(grep ' CORR ' $1|tail -n 1)
-        [ "$method" == '' ] && method=$(grep 'EUMP2' $1|tail -n 1) \
-        || method='CORR'
-        if [ "$method" != 'CORR' ]; then
-            [ "$method" == '' ] && method='SCF Done' || method='EUMP2'
-        fi  
-        rowE=$(grep "$method" $1 | tail -n 1)
-        case $method in
-        "CORR")
-            E=$(echo $rowE | awk '{print $4}')
-            ;;  
-        "EUMP2")
-            E=$(echo $rowE | awk '{print $6}' | sed 's/D/E/g' ) 
-            ;;  
-        "SCF Done") # HF and DFT
-            E=$(echo $rowE | awk '{print $5}')
-			method=$(grep 'SCF Done:' $1 | tail -n 1 | awk '{print $3}' \
-					| sed 's/E(//g' | sed 's/)//g')
-        ;;  
-        esac 	
-    sym=$(grep 'point group' $1 | tail -n 1 | awk '{print $4}')
-    basis=$(grep 'Standard basis' $1 | tail -n 1 | awk '{print $3}')
-else
-    # QChem
-    num=$(grep -B 2 'Molecular Point Group' $1 | head -n 1 \
-            | awk '{print $1}' )
-            # echo test $num
-    grep -A $(($num+2)) 'Standard Nuclear Orientation' $1 | tail -n $num | \
-    awk '{print $2 "\t" $3 "\t" $4 "\t" $5}' > coord.tmp
-    E=$(grep 'Total energy in the final basis set =' $1 | tail -n 1 \
-        | awk '{print $9}')
-    sym=$(grep 'Molecular Point Group' $1 | tail -n 1 | awk '{print $4}')
-    basis=$(grep 'Requested bas]is set is' $1| tail -n 1 | awk '{print $5}')
-    method=$(grep -i 'method' $1| tail -n 1 | awk '{print $2}')
-    if [ "$method" == "" ] 
-    then
-	    method=$(grep -i 'exchange' $1 | head -n 1 | awk '{print $2}' )
+    #Step1. extract the coordinate
+    extractXYZ
+
+    #Step2. print the result
+    stdOut 
+}
+
+function checkInp(){
+    [ "$1" == "" ] && \
+    echo 'No 1st. arg., you must key-in the name of G09/QChem output file' \
+    && exit
+    GorQ=$(grep ' Gaussian, Inc' $1 | tail -n 1)
+    if [ "$GorQ" == "" ] ; then
+        GorQ=$(grep 'Q-Chem' $1 | tail -n 1)
+        [ "$GorQ" == "" ] && echo 'Unknown job type, exit.' && exit
+        GorQ=false # this is a QChem job
+        echo 'This is an QChem output'
+    else
+        GorQ=true # this is a Gaussian job
+        echo 'This is a Gaussian output'
     fi
-fi
 
-#Step2. print the result
-echo $num > $2
-echo "# $1 $method/$basis $E $sym" >> $2
-cat  coord.tmp >> $2
+    # if [ $GorQ ] ; then
+    #     judge=$(grep 'Stationary point found' $1)
+    # else
+    #     judge=$(grep 'OPTIMIZATION CONVERGED' $1)
+    # fi
+    # [ "$judge" == "" ] && echo 'Not optimized successfully' && exit
+    [ "$2" == "" ] && \
+    echo 'No 2nd. arg., please name an output file to store the rawdata' \
+    && exit
 
-echo "File name:        "$2
-echo "# of atoms:       "$num
-echo "Level of theory:  "$method/$basis
-echo "Point group:      "$sym
-echo " "
-cat coord.tmp
-rm -f coord.tmp  
+    checkInp=$GorQ
+}
 
+function extractXYZ(){
+    rm -f coord.tmp
+    if [ "$GorQ" = true ]; then 
+        # Gaussian
+        num=$(grep -w 'NAtoms' $1 | head -n 1 | awk '{print $2}' )
+        TODO:
+        grep -A $(($num+4)) 'Input orientation:' $1 | tail -n $num | \
+        #grep -A $(($num+4)) 'Standard orientation:' $1 | tail -n $num | \
+        #grep -A $(($num+4)) 'Z-Matrix orientation:' $1 | tail -n $num | \
+            awk '{print $2 "\t" $4 "\t" $5 "\t" $6}' > coord.tmp
+        cat coord.tmp > $2
+        
+            #The keyword for MP2 is 'EUMP2',and for CCSD is 'CORR'. Others
+            #are 'SCF Done'.
+            method=$(grep ' CORR ' $1|tail -n 1)
+            [ "$method" == '' ] && method=$(grep 'EUMP2' $1|tail -n 1) \
+            || method='CORR'
+            if [ "$method" != 'CORR' ]; then
+                [ "$method" == '' ] && method='SCF Done' || method='EUMP2'
+            fi  
+            rowE=$(grep "$method" $1 | tail -n 1)
+            case $method in
+            "CORR")
+                E=$(echo $rowE | awk '{print $4}')
+                ;;  
+            "EUMP2")
+                E=$(echo $rowE | awk '{print $6}' | sed 's/D/E/g' ) 
+                ;;  
+            "SCF Done") # HF and DFT
+                E=$(echo $rowE | awk '{print $5}')
+                method=$(grep 'SCF Done:' $1 | tail -n 1 | awk '{print $3}' \
+                        | sed 's/E(//g' | sed 's/)//g')
+            ;;  
+            esac 	
+        sym=$(grep 'point group' $1 | tail -n 1 | awk '{print $4}')
+        basis=$(grep 'Standard basis' $1 | tail -n 1 | awk '{print $3}')
+    else
+        # QChem
+        num=$(grep -B 2 'Molecular Point Group' $1 | head -n 1 \
+                | awk '{print $1}' )
+                # echo test $num
+        grep -A $(($num+2)) 'Standard Nuclear Orientation' $1 | tail -n $num | \
+        awk '{print $2 "\t" $3 "\t" $4 "\t" $5}' > coord.tmp
+        E=$(grep 'Total energy in the final basis set =' $1 | tail -n 1 \
+            | awk '{print $9}')
+        sym=$(grep 'Molecular Point Group' $1 | tail -n 1 | awk '{print $4}')
+        basis=$(grep 'Requested bas]is set is' $1| tail -n 1 | awk '{print $5}')
+        method=$(grep -i 'method' $1| tail -n 1 | awk '{print $2}')
+        if [ "$method" == "" ] 
+        then
+            method=$(grep -i 'exchange' $1 | head -n 1 | awk '{print $2}' )
+        fi
+    fi
+}
+
+function stdOut(){
+    echo $num > $2
+    echo "# $1 $method/$basis $E $sym" >> $2
+    cat  coord.tmp >> $2
+
+    echo "File name:        "$2
+    echo "# of atoms:       "$num
+    echo "Level of theory:  "$method/$basis
+    echo "Point group:      "$sym
+    echo " "
+    cat coord.tmp
+    rm -f coord.tmp 
+}
+
+main $@
