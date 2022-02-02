@@ -2,59 +2,75 @@
 #####################################################################
 #	Program :														#
 #			Extract the a series of structures and then write the 	#
-#			g09 input file											#
+#			qchem input file										#
 #	Input :															#
-#			$1 = test.txt ; store a series of structure				#
-#			$2 = header.txt ; info. of $rem							#
-#           $3 = ecp                                                #
+#			$1 = test.xyz ; store a series of structure				#
 #	Output :														#
-#			lots of *.com											#
+#			lots of *.inp											#
 #                                                                   #
 #   History:                                                        #
-# 2016/04/20, Grace, 1st. ver.                                      #
-# 2019/03/26, Grace, bugs from the negative coordinate              #
-# 2020/09/18. Grace, add the third input file as the footer.        #
+# 2022/02/02. Grace, copy writeGauInpV and then rewrite this script.#
 #####################################################################
 
-# Step 1 Check the input arguments
-[ "$1" == "" ] && echo "file $1 is not exist, exit" && exit
-[ "$2" == "" ] && echo "file $1 is not exist, exit" && exit
+function main(){
+    # 1. check input argument and extract necessary info.
+    checkInput $1 
 
-natom=$(head -n 1 $1)
-natom_2=$(($natom+2))
-fileLine=$(wc -l $1 | awk '{print $1}')
-nfile=$(( $fileLine/($natom+2) ))
+    # 2. generate qchem option into a file
+    qchemOption # output: qchemOption.tmp
 
-read -p 'Please key-in the charge: ' charge
-read -p 'Please key-in the multiplicity: ' multi
+    # 3. generate qchem input files
+    genqchemInp $1 qchemOption.tmp # output: *.inp
+    rm -f qchemOption.tmp
+}
 
-for (( i=1;i<=$nfile;i++))
-do
-	head -n $(( $natom_2*$i )) $1 | tail -n $natom_2 > tmp.txt
-	name=$(sed -n '2,2 p' tmp.txt)
-    
-	if [ `echo $name | grep -c \-` = 1 ]
-	then
-		name=n$name
-	fi
-	
-    name=$(echo $name | sed 's/ //g')
+function checkInput(){
+    [ "$1" == "" ] && echo "file $1 is not exist, exit" && exit
 
-cat << EOF > "${name}".com 
-`cat $2` 
+    natom=$(head -n 1 $1)
+    natom_2=$(($natom+2))
+    fileLine=$(wc -l $1 | awk '{print $1}')
+    nfile=$(( $fileLine/($natom+2) ))
 
-scan potential 
+    read -p 'Please key-in the charge: ' charge
+    read -p 'Please key-in the multiplicity: ' multi
+}
 
-$charge $multi
-`tail -n $natom tmp.txt`
+function genqchemInp(){
+    # $1 = geometry file
+    # $2 = qchemOption.tmp
 
+    for (( i=1;i<=$nfile;i++))
+    do
+        head -n $(( $natom_2*$i )) $1 | tail -n $natom_2 > tmp.tmp
+        name=$(sed -n '2,2 p' tmp.tmp)
+        
+        if [ `echo $name | grep -c \-` = 1 ]
+        then
+            name=n$name
+        fi
+        
+        name=$(echo $name | sed 's/ //g')
+        echo "${name}".inp
+
+cat << EOF > "${name}".inp
+\$molecule
+    $charge $multi
+`tail -n $natom tmp.tmp` 
+\$end 
 EOF
 
-# if [ -f $3 ] 
-# then 
-#     cat $3 >> "$name".com 
-# fi
+cat $2 >> "${name}".inp
 
-done
+    done
 
-rm -f tmp.txt
+    rm -f tmp.tmp
+}
+
+function qchemOption(){
+cat << EOF > qchemOption.tmp
+    test 
+EOF
+}
+
+main $1 
