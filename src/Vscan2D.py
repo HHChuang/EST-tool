@@ -33,9 +33,8 @@
 
 # %%
 import numpy as np
-import re
 import sys
-import os
+import argparse
 
 def read1file(file):
     '''
@@ -215,7 +214,7 @@ def calc_Bond(struc, dof):
         moveUnitVec[idx-1] = unit_vec.tolist()
     return moveUnitVec
 
-if __name__ == "__main__":
+def test_calc_Bond():
     """Test scan bond function."""
     # --- hardcoded test inputs ---
     struc = [
@@ -234,6 +233,11 @@ if __name__ == "__main__":
     for (atom, _, _, _), disp in zip(struc, moveUnitVec):
         print(f"{atom} {disp[0]:.6f} {disp[1]:.6f} {disp[2]:.6f}")
 
+def _is_interactive():
+    return not sys.argv[0] or sys.argv[0].endswith(('ipykernel_launcher.py', 'pydevconsole.py'))
+
+if __name__ == "__main__" and _is_interactive():
+    test_calc_Bond()
 # %% 
 def calc_AngDihed(struc, dof, idx):
     '''
@@ -316,7 +320,7 @@ def calc_AngDihed(struc, dof, idx):
     return displacement_vectors
 
 
-if __name__ == "__main__":
+def test_angle_scan():
     """Test scan angle function."""
     # --- hardcoded test inputs ---
     struc = [
@@ -337,7 +341,9 @@ if __name__ == "__main__":
         print(f"Displacement vectors for angle changing DOF at step index {idx}:")
         for (atom, _, _, _), disp in zip(struc, displacement_vectors):
             print(f"{atom} {disp[0]:.6f} {disp[1]:.6f} {disp[2]:.6f}")
-    
+
+if __name__ == "__main__" and _is_interactive():
+    test_angle_scan()
     
 # %%
 def scan2D(struc, dofs):
@@ -440,7 +446,7 @@ def write_xyz_frames(frames, fileidx, filename):
                 f.write(f"{sym} {x:.8f} {y:.8f} {z:.8f}\n")
 
 
-if __name__ == "__main__":
+def test_scan2D_1Dscan():
     """Test 1D scan function."""
     # --- hardcoded test inputs ---
     struc = [
@@ -448,9 +454,37 @@ if __name__ == "__main__":
         ('O', 0.0,  0.0,   0.0),
         ('H', 1.0, -1.414, 0.0),
     ]
-    # dofs = [
-    #     {'atoms': [1, 2],    'type': 'bond',  'initial': -1.0, 'final': 1.0, 'stepsize': 0.2, 'moving_atoms': [2]}
-    # ]
+    
+
+    print('Bond scan for moving one atom:')
+    dofs = [
+        {'atoms': [1, 2],    'type': 'bond',  'initial': -1.0, 'final': 1.0, 'stepsize': 0.2, 'moving_atoms': [2]}
+    ]
+    fileidx, scanStruc = scan2D(struc, dofs)
+
+    print(f"Generated {len(scanStruc)} structures :")
+    for idx, s in enumerate(scanStruc):
+        print(len(struc))
+        print(fileidx[idx])
+        for atom in s:
+            print(atom)
+        print()
+
+    print('Bond scan for moving two atom:')
+    dofs = [
+        {'atoms': [1, 2],    'type': 'bond',  'initial': -1.0, 'final': 1.0, 'stepsize': 0.2, 'moving_atoms': [2, 3]}
+    ]
+    fileidx, scanStruc = scan2D(struc, dofs)
+
+    print(f"Generated {len(scanStruc)} structures :")
+    for idx, s in enumerate(scanStruc):
+        print(len(struc))
+        print(fileidx[idx])
+        for atom in s:
+            print(atom)
+        print()    
+
+    print('Angle scan for moving two atom:')    
     dofs = [
         {'atoms': [1, 2, 3], 'type': 'angle', 'initial': -10.0, 'final': 10.0, 'stepsize': 2, 'moving_atoms': [3]}
     ]
@@ -465,12 +499,14 @@ if __name__ == "__main__":
             print(atom)
         print()
 
-    # output_file = "scantest.xyz"
-    # write_xyz_frames(scanStruc, fileidx, output_file)
-    # print(f"Wrote {len(scanStruc)} frames to '{output_file}'")
+    output_file = "scantest.xyz"
+    write_xyz_frames(scanStruc, fileidx, output_file)
+    print(f"Wrote {len(scanStruc)} frames to '{output_file}'")
 
+if __name__ == "__main__" and _is_interactive():
+    test_scan2D_1Dscan()
 
-if __name__ == "__main__":
+def test_scan2D_2Dscan():
     """Test 2D scan function."""
     # --- hardcoded test inputs ---
     struc = [
@@ -500,6 +536,8 @@ if __name__ == "__main__":
     write_xyz_frames(scanStruc, fileidx, output_file)
     print(f"Wrote {len(scanStruc)} frames to '{output_file}'")
 
+if __name__ == "__main__" and _is_interactive():
+    test_scan2D_2Dscan()
 
 # %%
 if __name__ == "__main__":
@@ -508,9 +546,11 @@ if __name__ == "__main__":
         scan_file = sys.argv[2]
         try:
             struc = read1file(xyz_file)
+            print('-------------------------------------------')
             print(f"Read {len(struc)} atoms from {xyz_file}:")
             for atom in struc:
                 print(atom)
+            print('')
         except Exception as e:
             print(f"Error reading file '{xyz_file}': {e}")
             sys.exit(1)
@@ -520,6 +560,7 @@ if __name__ == "__main__":
             print(f"Read {len(dofs)} DOFs from {scan_file}:")
             for dof in dofs:
                 print(dof)
+            print('-------------------------------------------')
         except Exception as e:
             print(f"Error reading file '{scan_file}': {e}")
             sys.exit(1)

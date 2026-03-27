@@ -53,7 +53,7 @@
    - `writeGauInp`: Extract the coordinate and then write the input file for Gaussian program.
    - `writeGauInpV`:
 2. Fortran
-   - `Vscan1D`: Produce a serious of structure along a selected coordinate.
+   <!-- - `Vscan1D`: Produce a serious of structure along a selected coordinate. -->
    - `ComW`: Find out the centre-of-mass of attached water
    <!-- - `AddWDir` - 2015/10/17,Grace
       - Approximate the H-Bond is linear, and then construct the H-Bond network (1st shell) input files	
@@ -82,6 +82,9 @@
 		- $1=PES.txt
 		- $2=reduced mass -->
 3. Python
+   - `Vscan2D.py`: scan 1D or 2D PEC/PES
+     - `$] python Vscan2D.py $mol.xyz $scan.dat`
+     - output: `scan1D.xyz` or `scan2D.xyz` (see `/run`)
 4. Others
    <!-- - `moviemol` 
      - [ref.](http://www.ifm.liu.se/compchem/moviemol/moviemol.html)

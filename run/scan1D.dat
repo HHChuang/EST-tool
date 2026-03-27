@@ -1,0 +1,6 @@
+# [# of selected atom] initial final stepsize
+# bond/angle/dihedral: moves the last atom/group
+# First degrees of freedom
+1 2 -10 10 0.01
+# moving atom/group
+2
