@@ -2,11 +2,11 @@
 #################################################################################
 # Program :                                                                     #
 #   Create SLURM file(s) to submit electronic structure input file(s).          # 
-#   Programs: ORCA 6.1, GAUSSIAN16, Q-Chem 5.3, Molpro 2019.                    #
+#   Programs: ORCA 6.1, GAUSSIAN16, (Q-Chem 5.3, Molpro 2019).                  #
 #                                                                               #
 # History:                                                                      #
 # 2015-2020, Grace, SGE versions.                                               #
-# 2026/04/10, Grace, Migrated to SLURM for LUIS Cluster (Hannover).             #
+# 2026/04/10, Grace, Migrated to SLURM for HPC (Hannover).                      #
 #################################################################################
 
 # Main program
@@ -19,6 +19,7 @@ function main(){
         debug=''
         threads=1
         partition='mpp.share' # Standard LUIS partition
+        time='24:00:00'        # Default time limit
         tag=''
         est='orca'            # Default EST program
         prcs=1                # DEFAULT PROCESSORS (Allows 'qesub he.inp' to work)
@@ -59,6 +60,13 @@ function checkArg()
         '-p') 
             partition=$2
             shift 2
+        ;;
+        '-t')
+            time=$2
+            shift 2
+        ;;
+        '-h'|'--help') 
+            showIllustration
         ;;
         *)
             check_file_extension $inp_ext 
@@ -169,14 +177,13 @@ cat << EOF > $1.sh
 #  Program :                                                        #
 #       Submit the EST job(s) through SLURM workload manager.       #
 #####################################################################
-# Grace, chuang@aci.uni-hannover.de
 
 #SBATCH --job-name=$1
 #SBATCH --partition=$partition
 #SBATCH --ntasks=$prcs
 #SBATCH --nodes=1
 #SBATCH --mem=8G
-#SBATCH --time=24:00:00
+#SBATCH --time=$time
 #SBATCH --output=$1_%j.log
 
 module purge
@@ -242,6 +249,18 @@ Four modes are provided:
 
 =head2 Options:
 
+=over 8
+
+=back
+
+=head3
+
+=over 8
+
+=item -h, --help    show this help message and exit
+
+=back
+
 =head3 B<EST related:>
 
 =over 8
@@ -257,6 +276,8 @@ Four modes are provided:
 =item -np B<procs>  invoke a parallel job with B<procs> cpus.
 
 =item -p B<partition>    specify the SLURM partition.
+
+=item -t B<time>    specify the time limit for the job (format: HH:MM:SS).
 
 =back
 
