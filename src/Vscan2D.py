@@ -36,6 +36,10 @@ import numpy as np
 import sys
 import argparse
 
+def _is_interactive():
+    return not sys.argv[0] or sys.argv[0].endswith(('ipykernel_launcher.py', 'pydevconsole.py'))
+
+
 def read1file(file):
     '''
     Purpose: Read molecular structure from XYZ format file.
@@ -232,10 +236,6 @@ def test_calc_Bond():
     print(f"Moving unit vector for bond length changing DOF:")
     for (atom, _, _, _), disp in zip(struc, moveUnitVec):
         print(f"{atom} {disp[0]:.6f} {disp[1]:.6f} {disp[2]:.6f}")
-
-def _is_interactive():
-    return not sys.argv[0] or sys.argv[0].endswith(('ipykernel_launcher.py', 'pydevconsole.py'))
-
 if __name__ == "__main__" and _is_interactive():
     test_calc_Bond()
 # %% 
@@ -248,6 +248,7 @@ def calc_AngDihed(struc, dof, idx):
     for angle/dihedral core displacement.
     '''
     val = dof['initial'] + (idx) * dof['stepsize'] # unit: degree
+    val_rad = np.radians(val)
     atoms = dof['atoms']
     moving = dof['moving_atoms']
     displacement_vectors = [[0.0, 0.0, 0.0] for _ in struc]
@@ -285,40 +286,74 @@ def calc_AngDihed(struc, dof, idx):
             displacement_vectors[idx_move-1] = disp_vec
 
     elif dof['type'] == 'dihedral':
-        i, j, k, l = atoms[0]-1, atoms[1]-1, atoms[2]-1, atoms[3]-1
+        # Dihedral involves atoms i-j-k-l. Rotation axis is bond j-k.
+        # We rotate atom l (and all 'moving_atoms') around the j-k axis.
+        j, k = atoms[1]-1, atoms[2]-1
         pos_j = np.array(struc[j][1:])
         pos_k = np.array(struc[k][1:])
-        pos_l = np.array(struc[l][1:])
-
-        bond_vec = pos_k - pos_j
-        bond_norm = np.linalg.norm(bond_vec)
-        if bond_norm == 0:
-            raise ValueError("Bond length is zero")
-        bond_unit = bond_vec / bond_norm
-
-        val_rad = np.radians(val)
-        vec_kl = pos_l - pos_k
-        proj = np.dot(vec_kl, bond_unit) * bond_unit
-        perp = vec_kl - proj
-
-        K = np.array([[0, -bond_unit[2], bond_unit[1]],
-                      [bond_unit[2], 0, -bond_unit[0]],
-                      [-bond_unit[1], bond_unit[0], 0]])
+        
+        axis_vec = pos_k - pos_j
+        axis_unit = axis_vec / np.linalg.norm(axis_vec)
+        
+        # Rodrigues' Rotation Matrix for the dihedral angle
+        K = np.array([[0, -axis_unit[2], axis_unit[1]], 
+                      [axis_unit[2], 0, -axis_unit[0]], 
+                      [-axis_unit[1], axis_unit[0], 0]])
         R = np.eye(3) + np.sin(val_rad) * K + (1 - np.cos(val_rad)) * (K @ K)
 
-        new_perp = R @ perp
-        new_vec_kl = proj + new_perp
-        new_pos_l = pos_k + new_vec_kl
-        disp_vec = (new_pos_l - pos_l).tolist()
-
         for idx_move in moving:
-            displacement_vectors[idx_move-1] = disp_vec
+            m_idx = idx_move - 1
+            pos_m = np.array(struc[m_idx][1:])
+            
+            # Vector from a point on the axis (atom k) to the moving atom
+            vec_km = pos_m - pos_k
+            
+            # Rotate the vector
+            new_vec_km = R @ vec_km
+            
+            # Displacement is (New Position - Original Position)
+            new_pos_m = pos_k + new_vec_km
+            displacement_vectors[m_idx] = (new_pos_m - pos_m).tolist()
 
     else:
         raise ValueError(f"Invalid DOF type for calc_AngDihed: {dof['type']}")
 
     return displacement_vectors
 
+def test_dihedral_scan():
+    """Test scan dihedral function by printing displacement vectors."""
+    # Hydrogen Peroxide-like structure (HOOH)
+    # Axis of rotation is the O-O bond (Atoms 2 and 3)
+    struc = [
+        ('H', 0.8,  0.7,  0.0), # Atom 1
+        ('O', 0.0,  0.0,  0.0), # Atom 2
+        ('O', 0.0,  0.0,  1.4), # Atom 3
+        ('H', 0.8, -0.7,  1.4), # Atom 4
+    ]
+    
+    # Rotate the second H (Atom 4) around the O-O bond
+    # DOF atoms: 1-2-3-4
+    dof = {
+        'atoms': [1, 2, 3, 4], 
+        'type': 'dihedral', 
+        'initial': 0.0, 
+        'final': 90.0, 
+        'stepsize': 30.0, 
+        'moving_atoms': [4]
+    }
+
+    nsteps = int((dof['final'] - dof['initial']) / dof['stepsize'])
+    
+    print(f"--- Starting Dihedral Scan: {dof['initial']} to {dof['final']} degrees ---")
+    
+    for idx in range(nsteps + 1):
+        displacement_vectors = calc_AngDihed(struc, dof, idx)
+        current_angle = dof['initial'] + (idx * dof['stepsize'])
+        
+        print(f"{len(struc)}")
+        print(f"Step {idx} (Angle Delta: {current_angle} deg)")
+        for (atom, _, _, _), disp in zip(struc, displacement_vectors):
+            print(f"{atom} {disp[0]:.6f} {disp[1]:.6f} {disp[2]:.6f}")
 
 def test_angle_scan():
     """Test scan angle function."""
@@ -344,7 +379,8 @@ def test_angle_scan():
 
 if __name__ == "__main__" and _is_interactive():
     test_angle_scan()
-    
+    test_dihedral_scan()
+
 # %%
 def scan2D(struc, dofs):
     
