@@ -2,7 +2,7 @@
 #################################################################################
 # Program :                                                                     #
 #   Create SLURM file(s) to submit electronic structure input file(s).          # 
-#   Programs: ORCA 6.1, GAUSSIAN16, (Q-Chem 5.3, Molpro 2019).                  #
+#   Programs: ORCA 6.1, GAUSSIAN16, Jellyfish, (Q-Chem 5.3, Molpro 2019).       #
 #                                                                               #
 # History:                                                                      #
 # 2015-2020, Grace, SGE versions.                                               #
@@ -12,16 +12,13 @@
 # Main program
 function main(){
     # 0. global variables setting 
-        USAGE='Usage: qesub [ -e orca|g16|qchem|molpro ] [ -np procs ] infile'
+        USAGE='Usage: qesub [ -e orca|g16|jellyfish|qchem|molpro ] [ -np procs ] infile'
 
-        inp_ext='inp'
-        out_ext='out'
         debug=''
         threads=1
         partition='mpp.share' # Standard LUIS partition
         time='24:00:00'        # Default time limit
         tag=''
-        est='orca'            # Default EST program
         prcs=1                # DEFAULT PROCESSORS (Allows 'qesub he.inp' to work)
 
     # 1. check arguments
@@ -69,8 +66,9 @@ function checkArg()
             showIllustration
         ;;
         *)
-            check_file_extension $inp_ext 
             input=$1
+            check_file_extension $input
+
             case $input in 
             'all') checkArg='2' ;;
             'fail') checkArg='3' ;;
@@ -87,12 +85,44 @@ function checkArg()
 
 function check_file_extension()
 {
+
+    ext="${1##*.}"
+
+    if [ -z "$est" ]; then
+        if [ "$ext" == "com" ]; then
+            est='g16'
+        elif [ "$ext" == "jlf" ]; then
+            est='jellyfish'
+        else
+            est='orca'
+        fi
+    fi
+
     if [ "$est" == "g16" ]; then
         inp_ext='com'; out_ext='log'
+    elif [ "$est" == "jellyfish" ]; then
+        inp_ext='jlf'; out_ext='jlf'
     else
         inp_ext='inp'; out_ext='out'
     fi
+
 }
+
+function jellyfish_input()
+{
+    # $1=$job; job name 
+
+    cat << JFEOF
+export LD_LIBRARY_PATH=/bigwork/nhcahsch/envs/jellyfish/lib:\$LD_LIBRARY_PATH
+export QT_QPA_PLATFORM=offscreen
+
+cd /bigwork/nhcahsch/conda/Jellyfish/build
+
+printf "load \${SLURM_SUBMIT_DIR}/${job}.jlf\ncalculate all -r\nsave \${SLURM_SUBMIT_DIR}/${job}_result\nexit\n" | ./JellyfishCMD/JellyfishCMD
+JFEOF
+}
+
+
 
 function genlist()
 {
@@ -161,6 +191,7 @@ function genSLURMfile()
             case $est in
                 'orca')   echo "\$(which orca) $job.inp > $job.out" >> $sname.sh ;;
                 'g16')    echo "g16 < $job.com > $job.log" >> $sname.sh ;;
+                'jellyfish') jellyfish_input $job >> $sname.sh ;;
                 'qchem')  echo "qchem -nt $prcs $job.inp $job.out" >> $sname.sh ;;
                 'molpro') echo "molpro < $job.inp > $job.out" >> $sname.sh ;;
             esac
@@ -190,15 +221,26 @@ module purge
 EOF
 
 case $est in
-    'orca') echo "module load GCC/13.2.0 OpenMPI/4.1.6 ORCA/6.1.0" >> $1.sh ;;
-    'g16')  echo "module load Gaussian/16.C.01" >> $1.sh ;;
+    'orca') 
+        echo "module load GCC/13.2.0 OpenMPI/4.1.6 ORCA/6.1.0" >> $1.sh 
+    ;;
+    'g16')  
+        echo "module load Gaussian/16.C.01" >> $1.sh 
+        ;;
+    'jellyfish') 
+        echo "export LD_LIBRARY_PATH=/bigwork/nhcahsch/envs/jellyfish/lib:\$LD_LIBRARY_PATH" >> $1.sh 
+        echo "export QT_QPA_PLATFORM=offscreen" >> $1.sh 
+    ;;
 esac
+
+echo '' >> $1.sh 
 
 cat << EOF >> $1.sh
 cd \$SLURM_SUBMIT_DIR
 echo 'Job starts'
 echo "    Host: \$HOSTNAME"
 echo '    Date:' \`date\`
+
 EOF
 }
 
@@ -265,7 +307,7 @@ Four modes are provided:
 
 =over 8
 
-=item -e [B<orca|g16|qchem|molpro>]      assign EST program 
+=item -e [B<orca|g16|jellyfish>]      assign EST program 
 
 =back
 
