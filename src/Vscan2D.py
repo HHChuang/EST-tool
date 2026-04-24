@@ -1,4 +1,4 @@
-# !/usr/bin/env python
+#!/usr/bin/env python3
 #########################################################################
 #                                                                       #                        
 #   Program: Generate molecular structure by scanning two-dimensional   #

@@ -1,0 +1,140 @@
+#!/bin/bash
+#####################################################################
+#   Program: writeInpV                                              #
+#       Extract structures from an xyz trajectory and write         #
+#       input files for Gaussian, Q-Chem, or ORCA.                 #
+#                                                                   #
+#   Input:                                                          #
+#       $1 = trajectory.xyz  (multi-frame xyz file)                 #
+#       $2 = header/options file (optional; prompted if omitted)    #
+#            Gaussian : route section file                          #
+#            Q-Chem   : $rem block file                             #
+#            ORCA     : keywords file (first line: ! keywords ...)  #
+#                                                                   #
+#   Output:                                                         #
+#       Gaussian : *.com                                            #
+#       Q-Chem   : *.inp                                            #
+#       ORCA     : *.inp                                            #
+#                                                                   #
+#   History:                                                        #
+#   2016/04/20, Grace, writeGauInpV 1st ver.                       #
+#   2022/02/02, Grace, writeQchemInpV from writeGauInpV            #
+#   2026/04/24, Grace, combined into writeInpV; added ORCA         #
+#####################################################################
+
+function main(){
+    checkInput "$1"
+
+    echo "Select software:"
+    echo "  1) Gaussian"
+    echo "  2) Q-Chem"
+    echo "  3) ORCA"
+    read -p "Choice [1/2/3]: " sw_choice
+
+    case $sw_choice in
+        1) writeGauInp   "$1" "$2" ;;
+        2) writeQchemInp "$1" "$2" ;;
+        3) writeOrcaInp  "$1" "$2" ;;
+        *) echo "Invalid choice, exit" && exit 1 ;;
+    esac
+}
+
+function checkInput(){
+    [ "$1" == "" ] && echo "Usage: writeInpV <trajectory.xyz> [header]" && exit 1
+    [ ! -f "$1" ] && echo "File '$1' not found, exit" && exit 1
+
+    natom=$(head -n 1 "$1")
+    natom_2=$(( natom + 2 ))
+    fileLine=$(wc -l < "$1")
+    nfile=$(( fileLine / natom_2 ))
+
+    read -p 'Charge: ' charge
+    read -p 'Multiplicity: ' multi
+}
+
+function getFrame(){
+    # $1=xyz file, $2=frame index (1-based)
+    # sets global: name
+    head -n $(( natom_2 * $2 )) "$1" | tail -n $natom_2 > _frame.tmp
+    name=$(sed -n '2p' _frame.tmp)
+    [ $(echo "$name" | grep -c '\-') = 1 ] && name="n${name}"
+    name=$(echo "$name" | sed 's/ //g')
+}
+
+function resolveFile(){
+    # $1 = file from arg (may be empty), $2 = prompt string
+    # sets global: header_file
+    if [ -f "$1" ]; then
+        header_file="$1"
+    else
+        read -p "$2" header_file
+        [ ! -f "$header_file" ] && echo "File '$header_file' not found, exit" && exit 1
+    fi
+}
+
+function writeGauInp(){
+    local xyzfile="$1"
+    resolveFile "$2" "Gaussian header file (route section): "
+
+    for (( i=1; i<=nfile; i++ )); do
+        getFrame "$xyzfile" $i
+        echo "${name}.com"
+cat << EOF > "${name}.com"
+$(cat "$header_file")
+
+scan potential
+
+$charge $multi
+$(tail -n $natom _frame.tmp)
+
+EOF
+    done
+    rm -f _frame.tmp
+}
+
+function writeQchemInp(){
+    local xyzfile="$1"
+    resolveFile "$2" 'Q-Chem options file ($rem block): '
+
+    for (( i=1; i<=nfile; i++ )); do
+        getFrame "$xyzfile" $i
+        echo "${name}.inp"
+cat << EOF > "${name}.inp"
+\$molecule
+    $charge $multi
+$(tail -n $natom _frame.tmp)
+\$end
+
+EOF
+        cat "$header_file" >> "${name}.inp"
+    done
+    rm -f _frame.tmp
+}
+
+function writeOrcaInp(){
+    local xyzfile="$1"
+    local kw_file
+
+    if [ -f "$2" ]; then
+        kw_file="$2"
+    else
+        read -p 'ORCA keywords (e.g. B3LYP def2-SVP SP): ' kw_line
+        echo "! ${kw_line}" > _orca_kw.tmp
+        kw_file="_orca_kw.tmp"
+    fi
+
+    for (( i=1; i<=nfile; i++ )); do
+        getFrame "$xyzfile" $i
+        echo "${name}.inp"
+cat << EOF > "${name}.inp"
+$(cat "$kw_file")
+
+* xyz $charge $multi
+$(tail -n $natom _frame.tmp)
+*
+EOF
+    done
+    rm -f _frame.tmp _orca_kw.tmp
+}
+
+main "$1" "$2"
