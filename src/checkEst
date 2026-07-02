@@ -1,0 +1,737 @@
+#!/bin/bash
+#################################################################################
+# Program :                                                                     #
+#   Check the status of electronic structure theory (EST) program output       #
+#   file(s), classify stationary points (SP, MIN, Saddle, IRC) and extract      #
+#   energies. Programs: GAUSSIAN16, Q-Chem, ORCA.                              #
+#                                                                               #
+# History:                                                                      #
+# 2016-2020, Grace, checkGau and checkQch developed as separate scripts.        #
+# 2026/07/02, Grace, merged checkGau + checkQch into checkEst with a -e         #
+#             program switch, mirroring qesub's structure. checkMol's 2D       #
+#             grid-scan mode is a distinct workflow and intentionally not      #
+#             merged here.                                                     #
+# 2026/07/02, Grace, added ORCA support (energy, ZPE, imaginary frequencies,   #
+#             IRC path summary) based on ORCA 5/6 output conventions; not      #
+#             yet validated against a real ORCA output file.                   #
+#################################################################################
+
+# Main program
+function main(){
+    # 0. global variables setting
+        USAGE='Usage: checkEst [ -e g16|qchem|orca ] infile'
+
+        est=''
+        input=''
+
+    # 1. check arguments
+        checkArg $@
+
+    # 2. configure per-program settings (extension, termination keyword, units)
+        setProgramConfig
+
+    # 3. print out purpose
+        stdoutPurpose
+
+    # 4. check input argument, build job list
+        getNumJobs $input
+        NumJobs=$?
+
+    # 5. check each job is success or fail
+        checkJobs $NumJobs list.dat # output: statistic.dat
+
+    # 6. classify jobs into SP, MIN, Saddle or IRC
+        classifyJobs statistic.dat
+        # output : class.dat (SP.dat, MIN.dat, Saddle.dat, IRC.dat)
+
+    # 7. analyse the result of jobs and std-out
+        analyseJobs statistic.dat class.dat SP.dat MIN.dat Saddle.dat IRC.dat
+
+    # 8. clean up any leftover per-job tmp files (e.g. Q-Chem's lastOne extract)
+        rm -f *.tmp.$out_ext
+}
+
+function checkArg()
+{
+    until [ $# -eq 0 ]
+    do
+        case $1 in
+        '-e')
+            est=$2
+            shift 2
+        ;;
+        '-h'|'--help')
+            showIllustration
+        ;;
+        *)
+            input=$1
+            shift
+        ;;
+        esac
+    done
+
+    [ -z "$est" ] && est='orca' # DEFAULT PROGRAM
+
+    if [ "$input" == '' ]; then showIllustration; fi
+}
+
+function setProgramConfig()
+{
+    case "$est" in
+    'g16')
+        out_ext='log'
+        termKeyword='Normal termination'
+        ZPEUnit='hartree'
+    ;;
+    'qchem')
+        out_ext='out'
+        termKeyword='Thank you very much for using Q-Chem'
+        ZPEUnit='kcal/mol'
+    ;;
+    'orca')
+        out_ext='out'
+        termKeyword='ORCA TERMINATED NORMALLY'
+        ZPEUnit='hartree'
+    ;;
+    *)
+        echo "Unsupported EST program: $est" >&2
+        echo "$USAGE" >&2
+        exit 1
+    ;;
+    esac
+}
+
+function stdoutPurpose(){
+cat << EOF
+#############################################################################
+Program $0 checks and analyses $est output files
+
+Current working directory: $(pwd)
+The extension of output file is : .$out_ext
+
+1. Analyse all the $est output files
+>> checkEst -e $est all
+2. Analyse only one $est output file
+>> checkEst -e $est \$(name).$out_ext
+
+#############################################################################
+EOF
+}
+
+function getNumJobs(){
+    # $1 = input argument
+    # output: list.dat
+    case $1 in
+    "all") # benchmark mode
+        ls | grep "\.${out_ext}\$" | sed "s/\.${out_ext}\$//" > list.dat
+        NumJobs=$(wc -l list.dat | awk '{print $1}')
+        return $NumJobs
+    ;;
+    *) # single job mode
+        echo $1 | sed "s/\.${out_ext}\$//" > list.dat
+        return 1
+    ;;
+    esac
+}
+
+function ircKeyword(){
+    case $est in
+    'g16')   echo 'Summary of reaction path following' ;;
+    'qchem') echo 'Reaction path following' ;;
+    'orca')  echo 'IRC PATH SUMMARY' ;;
+    esac
+}
+
+function hasFrequencyBlock(){
+    # true (exit 0) if $1 contains a vibrational frequency calculation block
+    case $est in
+    'g16'|'qchem') grep -q 'Frequencies' $1 ;;
+    'orca')        grep -q 'VIBRATIONAL FREQUENCIES' $1 ;;
+    esac
+}
+
+function resolveWorkFile(){
+    # $1 = job name (no extension)
+    # sets $workfile; Q-Chem output files may contain several concatenated
+    # jobs, so extract only the last one into a tmp file first.
+    case $est in
+    'qchem')
+        lastOne_qchem $1.$out_ext
+        workfile=$1.tmp.$out_ext
+    ;;
+    *)
+        workfile=$1.$out_ext
+    ;;
+    esac
+}
+
+function lastOne_qchem(){
+    # input : test.out; Q-Chem output file
+    # output : $name.tmp.out (only the last job block)
+    local name=$(basename "$1" .$out_ext)
+    local first=$(grep -n Welcome $1 | tail -n 1 | cut -d ':' -f 1)
+    local last=$(wc -l $1 | awk '{print $1}')
+    sed -n "$first, $last p" $1 > $name.tmp.$out_ext
+}
+
+function checkJobs(){
+    # $1 = $NumJobs
+    # $2 = list.dat
+    # output: statistic.dat
+
+    NumJobs=$1
+    ListFile=$2
+
+    rm -f statistic.dat
+    for (( i=1; i<=$NumJobs; i++ ))
+    do
+        name=$(sed -n "$i,$i p" $ListFile)
+        test -e $name.$out_ext || { echo "file $name.$out_ext does not exist" >&2; exit 1; }
+
+        resolveWorkFile $name
+        End=$(grep -c "$termKeyword" $workfile)
+        if [ "$End" == "0" ]
+        then
+            stat=$(echo Fail)
+        else
+            stat=$(echo Success)
+        fi
+        echo $name $stat >> statistic.dat
+    done
+    rm -f $ListFile
+}
+
+function classifyJobs(){
+    # $1 = statistic.dat
+    # output : class.dat (SP.dat, MIN.dat, Saddle.dat, IRC.dat)
+
+    StatFile=$1
+
+    rm -f class.dat SP.dat MIN.dat Saddle.dat IRC.dat
+    grep Success $StatFile | awk '{print $1}' > NameList.dat
+
+    for name in `cat NameList.dat`
+    do
+        echo $name > name.dat
+        resolveWorkFile $name
+
+        # check it is IRC or not
+        numIRC=$(grep -c "$(ircKeyword)" $workfile)
+        if [ "$numIRC" == "0" ]
+        then
+            # check it is Saddle or MIN or SP
+            countIF $workfile
+            extractE $workfile
+            NumIF=$(head -n 1 IF.dat | awk '{print $1}')
+            if [ "$NumIF" == "0" ]
+            then
+                # IF is not exist
+                if hasFrequencyBlock $workfile
+                then
+                    extractZPE $workfile
+                    status=$(echo MIN)
+                    paste name.dat E.dat ZPE.dat >> MIN.dat
+                else
+                    status=$(echo SP)
+                    paste name.dat E.dat >> SP.dat
+                fi
+            else
+                # IF is exist
+                extractZPE $workfile
+                status=$(echo Saddle)
+                paste name.dat E.dat ZPE.dat IF.dat >> Saddle.dat
+            fi
+        else
+            # this is IRC result
+            status=$(echo IRC)
+            extractIRC $workfile
+            paste name.dat extractIRC.dat >> IRC.dat
+        fi
+        echo $name $status >> class.dat
+        rm -f name.dat extractIRC.dat IF.dat E.dat ZPE.dat
+    done
+    rm -f NameList.dat
+}
+
+function changeFormatSaddle(){
+    # $1 = Saddle.dat
+
+    awk '{print $4}' `echo $1`| awk 'NF > 0' > NumIF.dat
+    nline=0
+    rm -f saddle.tmp
+    for IF in `cat NumIF.dat`
+    do
+        nline=$(( $nline + 1 ))
+        if [ "$IF" == 1 ]
+        then
+            printf '%10s\t %16.10f\t %16.10f\t %2i\t %10.4f\n' $(sed -n "$nline,$nline p " `echo $1` ) >> saddle.tmp
+        else
+            saddlename=$(sed -n "$nline,$nline p" `echo $1`| awk '{print $1}')
+            saddleE=$(sed -n "$nline,$nline p" `echo $1`| awk '{print $2}')
+            saddleZPE=$(sed -n "$nline,$nline p" `echo $1`| awk '{print $3}')
+            for ((s=1;s<=$IF;s++))
+            do
+                if [ "$s" == 1 ]
+                then
+                    saddleEig=$(sed -n "$nline,$nline p" `echo $1`| awk '{print $5}')
+                else
+                    nline=$(( $nline + 1 ))
+                    saddleEig=$(sed -n "$nline,$nline p" `echo $1` )
+                fi
+                printf '%10s\t %16.10f\t %16.10f\t %2i\t %10.4f\n' "$saddlename" "$saddleE" "$saddleZPE" "$s" "$saddleEig" >> saddle.tmp
+            done
+        fi
+    done
+    mv -f saddle.tmp Saddle.dat
+    rm -f NumIF.dat
+}
+
+# ---- countIF: count and list imaginary frequencies, dispatched by $est ----
+function countIF(){
+    case $est in
+    'g16')   countIF_g16 $1 ;;
+    'qchem') countIF_qchem $1 ;;
+    'orca')  countIF_orca $1 ;;
+    esac
+}
+
+function countIF_g16(){
+    # input : test.log; Gaussian output file
+    # output : IF.dat
+    NAtoms=$(grep 'NAtoms' $1 | tail -n 1 | awk '{print $2}')
+    NumNM=$(( 3*NAtoms-6 )) # assume it is a nonlinear molecule
+    NumNMRemainder=$(( $NumNM%3 ))
+    NumNMRow=$(( $NumNM/3 ))
+
+    [ "$NumNMRemainder" != 0 ] && NumNMRow=$(( $NumNMRow + 1 ))
+    grep -w 'Frequencies --' $1 | grep -v 'Frequencies ---' \
+        |awk '{print $3,$4,$5}' | tail -n $NumNMRow > FreqList
+
+    awk '{print $1}' FreqList > FreqListColumn
+    awk '{print $2}' FreqList >> FreqListColumn
+    awk '{print $3}' FreqList >> FreqListColumn
+    NumIF=$(grep -c '-' FreqList)
+    echo $NumIF > tmp0.dat
+    if [ "$NumIF" == "0" ]
+    then
+        touch tmp1.dat
+    else
+        rm -f tmp1.dat
+        for (( i=1; i<=$NumIF; i++ ))
+        do
+            head -n $i FreqListColumn | tail -n 1 >> tmp1.dat
+        done
+    fi
+    paste tmp0.dat tmp1.dat > IF.dat
+    rm -f FreqList FreqListColumn tmp0.dat tmp1.dat
+}
+
+function countIF_qchem(){
+    # input : test.out; Q-Chem output file
+    # output : IF.dat
+    grep -w 'Frequency:' $1 | awk '{print $2,$3,$4}' > FreqList
+    awk '{print $1}' FreqList > FreqListColumn
+    awk '{print $2}' FreqList >> FreqListColumn
+    awk '{print $3}' FreqList >> FreqListColumn
+    NumIF=$(grep 'This Molecule has' $1 | grep 'Imaginary Frequencies' \
+        | tail -n 1 | awk '{print $4}')
+    if [ "$NumIF" == "" ]
+    then
+        echo 0 > tmp0.dat
+        touch tmp1.dat
+    else
+        echo $NumIF > tmp0.dat
+        grep '-' FreqListColumn > tmp1.dat
+    fi
+    paste tmp0.dat tmp1.dat > IF.dat
+    rm -f FreqList FreqListColumn tmp0.dat tmp1.dat
+}
+
+function countIF_orca(){
+    # input : test.out; ORCA output file
+    # output : IF.dat
+    #
+    # ORCA prints all 3*NAtoms modes under 'VIBRATIONAL FREQUENCIES' as
+    # 'N:  value cm**-1' (N=0..3*NAtoms-1); the first 6 (nonlinear molecule)
+    # are the near-zero translation/rotation modes, so keep only the last
+    # NumNM = 3*NAtoms-6 lines, mirroring countIF_g16's approach. An awk
+    # state machine (rather than a fixed context-line count) isolates the
+    # contiguous block of mode lines, since the number of header lines
+    # between the section title and the first mode can vary by version.
+    NAtoms=$(grep 'Number of atoms' $1 | tail -n 1 | awk '{print $NF}')
+    NumNM=$(( 3*NAtoms-6 )) # assume it is a nonlinear molecule
+
+    awk '
+        /VIBRATIONAL FREQUENCIES/ { seen=1; next }
+        seen && /^[[:space:]]*[0-9]+:[[:space:]]+-?[0-9.]+[[:space:]]+cm\*\*-1/ { print $2; collecting=1; next }
+        collecting { exit }
+    ' $1 | tail -n $NumNM > FreqListColumn
+
+    NumIF=$(grep -c '\-' FreqListColumn)
+    echo $NumIF > tmp0.dat
+    if [ "$NumIF" == "0" ]
+    then
+        touch tmp1.dat
+    else
+        grep '\-' FreqListColumn > tmp1.dat
+    fi
+    paste tmp0.dat tmp1.dat > IF.dat
+    rm -f FreqListColumn tmp0.dat tmp1.dat
+}
+
+# ---- extractE: final energy, dispatched by $est ----
+function extractE(){
+    case $est in
+    'g16')   extractE_g16 $1 ;;
+    'qchem') extractE_qchem $1 ;;
+    'orca')  extractE_orca $1 ;;
+    esac
+}
+
+function extractE_g16(){
+    # input : test.log; Gaussian output file
+    # output : E.dat
+
+    # The keyword for MP2 is 'EUMP2', for CCSD is 'CORR'. Others are 'SCF Done'.
+    method=$(grep ' CORR ' $1|tail -n 1)
+    [ "$method" == '' ] && method=$(grep 'EUMP2' $1|tail -n 1) \
+    || method='CORR'
+    if [ "$method" != 'CORR' ]; then
+        [ "$method" == '' ] && method='SCF Done' || method='EUMP2'
+    fi
+    rowE=$(grep "$method" $1 | tail -n 1)
+    case $method in
+    "CORR")
+        E=$(echo $rowE | awk '{print $4}')
+        ;;
+    "EUMP2")
+        E=$(echo $rowE | awk '{print $6}' | sed 's/D/E/g' )
+        ;;
+    "SCF Done")
+        E=$(echo $rowE | awk '{print $5}')
+    ;;
+    esac
+    echo $E >> E.dat
+}
+
+function extractE_qchem(){
+    # input : test.out; Q-Chem output file
+    # output : E.dat
+    E=$(grep 'Total energy in the final basis set' $1 | tail -n 1 \
+        | awk '{print $9}')
+    echo $E >> E.dat
+}
+
+function extractE_orca(){
+    # input : test.out; ORCA output file
+    # output : E.dat
+    # line format: 'FINAL SINGLE POINT ENERGY      -76.330949256808'
+    E=$(grep 'FINAL SINGLE POINT ENERGY' $1 | tail -n 1 | awk '{print $NF}')
+    echo $E >> E.dat
+}
+
+# ---- extractZPE: zero point energy, dispatched by $est ----
+function extractZPE(){
+    case $est in
+    'g16')   extractZPE_g16 $1 ;;
+    'qchem') extractZPE_qchem $1 ;;
+    'orca')  extractZPE_orca $1 ;;
+    esac
+}
+
+function extractZPE_g16(){
+    # input : test.log; Gaussian output file
+    # output : ZPE.dat (hartree)
+
+    method=$(grep ' CORR ' $1|tail -n 1)
+    [ "$method" == '' ] && method=$(grep 'EUMP2' $1|tail -n 1) \
+    || method='CORR'
+    if [ "$method" != 'CORR' ]; then
+        [ "$method" == '' ] && method='SCF Done' || method='EUMP2'
+    fi
+
+    ZPE=$(grep 'Zero-point correction' $1|tail -n 1| awk '{print $3}')
+
+    if [ "$method" == "CORR" ]; then
+        ZPE=0
+    fi
+
+    echo $ZPE >> ZPE.dat
+}
+
+function extractZPE_qchem(){
+    # input : test.out; Q-Chem output file
+    # output : ZPE.dat (kcal/mol)
+
+    ZPE=$(grep 'Zero point vibrational energy:' $1 | tail -n 1 \
+        | awk '{print $5}')
+    echo $ZPE >> ZPE.dat
+}
+
+function extractZPE_orca(){
+    # input : test.out; ORCA output file
+    # output : ZPE.dat (hartree)
+    # line format: 'Zero point energy    ...   0.10746477 Eh   67.44 kcal/mol'
+    ZPE=$(grep 'Zero point energy' $1 | tail -n 1 | awk '{print $5}')
+    echo $ZPE >> ZPE.dat
+}
+
+# ---- extractIRC: reactant/TS/product path summary, dispatched by $est ----
+function extractIRC(){
+    case $est in
+    'g16')   extractIRC_g16 $1 ;;
+    'qchem') extractIRC_qchem $1 ;;
+    'orca')  extractIRC_orca $1 ;;
+    esac
+}
+
+function extractIRC_g16(){
+    # input : test.log; Gaussian output file
+    # output : extractIRC.dat
+
+    tmp=$(grep '# OF POINTS ALONG THE PATH =' $1 | tail -n 1 \
+            |awk '{print $8}')
+    pts=$(($tmp+1))
+    TS=$(grep 'Energies reported relative to the TS energy of' $1 \
+            | awk '{print $9}' )
+    R=$(grep -A 3 'Summary of reaction path following' $1 | tail -n 1 \
+        | awk '{print $2}')
+    P=$(grep -A $(($pts+2)) 'Summary of reaction path following' $1 | \
+        tail -n 1 | awk '{print $2}')
+    echo $pts $R $TS $P > extractIRC.dat
+}
+
+function extractIRC_qchem(){
+    # input : test.out; Q-Chem output file
+    # output : extractIRC.dat
+
+    grep -A 1 'Reaction path following' $1 | grep Step > tmp.irc.dat
+    tmp=$(grep -n ' 1 E' tmp.irc.dat | tail -n 1 | cut -d ':' -f 1)
+    pts_R=$(($tmp-1))
+    pts_P=$(tail -n 1 tmp.irc.dat | awk '{print $2}')
+    pts=$(($pts_R+$pts_P))
+    TS=$(grep ' 1 E' tmp.irc.dat | tail -n 1 | awk '{print $4}')
+    R=$(head -n $pts_R tmp.irc.dat | tail -n 1 | awk '{print $4}')
+    P=$(tail -n 1 tmp.irc.dat | awk '{print $4}')
+    echo $pts $R $TS $P > extractIRC.dat
+    rm -f tmp.irc.dat
+}
+
+function extractIRC_orca(){
+    # input : test.out; ORCA output file
+    # output : extractIRC.dat
+    #
+    # ORCA prints an 'IRC PATH SUMMARY' table with rows like:
+    #   31     -1404.717412    0.000000    0.000149  0.000056 <= TS
+    # columns: Step  E(Eh)  dE(kcal/mol)  max(|G|)  RMS(G)  [<= TS]
+    # Reactant/product are the first/last rows; the TS row is flagged.
+    sed -n '/IRC PATH SUMMARY/,$p' $1 \
+        | awk 'NF>=5 && $1 ~ /^-?[0-9]+$/' > tmp.irc.dat
+    pts=$(wc -l tmp.irc.dat | awk '{print $1}')
+    R=$(head -n 1 tmp.irc.dat | awk '{print $2}')
+    P=$(tail -n 1 tmp.irc.dat | awk '{print $2}')
+    TS=$(grep 'TS' tmp.irc.dat | tail -n 1 | awk '{print $2}')
+    echo $pts $R $TS $P > extractIRC.dat
+    rm -f tmp.irc.dat
+}
+
+function analyseJobs(){
+    # $1 = statistic.dat
+    # $2 = class.dat
+    # $3 = SP.dat
+    # $4 = MIN.dat
+    # $5 = Saddle.dat
+    # $6 = IRC.dat
+
+    StatFile=$1
+    ClassFile=$2
+    SPFile=$3
+    MinFile=$4
+    SaddleFile=$5
+    IRCFile=$6
+
+    Total=$(wc -l $StatFile |awk '{print $1}')
+    Success=$(grep -c Success $StatFile)
+    Fail=$(grep -c Fail $StatFile)
+    SP=$(grep -c SP $ClassFile)
+    MIN=$(grep -c MIN $ClassFile)
+    Saddle=$(grep -c Saddle $ClassFile)
+    IRC=$(grep -c IRC $ClassFile)
+    grep Fail $StatFile | awk '{print $1}' > Fail.dat
+
+    stdoutStatResult $Total $Success $Fail
+
+    if [ -s Fail.dat ]
+    then
+        echo ""
+        echo '----- Fail/aborting -----'
+        cat Fail.dat
+    fi
+
+    if [ -f $ClassFile ]
+    then
+        stdoutClassResult $SP $MIN $Saddle $IRC
+
+        if [ -f SP.dat ]
+        then
+            echo ""
+            echo '----- SP -----'
+            printf '%10s\t %16s\t  \n' $(echo Name E\(hartree\))
+            printf '%10s\t %16.10f\t \n' $(cat SP.dat)
+        fi
+
+        if [ -f MIN.dat ]
+        then
+            echo ""
+            echo '----- MIN (minimum) -----'
+            printf '%10s\t %16s\t %16s\t \n' $(echo Name E\(hartree\) ZPE\($ZPEUnit\))
+            printf '%10s\t %16.10f\t %16.10f\t \n' $(cat MIN.dat)
+        fi
+
+        if [ -f Saddle.dat ]
+        then
+            echo ""
+            echo '----- Saddle (TS) -----'
+            printf '%10s\t %16s\t %16s\t %3s\t %10s\t \n' \
+            $(echo Name E\(hartree\) ZPE\($ZPEUnit\) \#IF IF\(cm^1\))
+            changeFormatSaddle Saddle.dat
+            printf '%10s\t %16.10f\t %16.10f\t %2i\t %10.4f\n' $(cat Saddle.dat)
+        fi
+
+        if [ -f IRC.dat ]
+        then
+            echo ""
+            echo '----- IRC -----'
+            printf '%10s\t %4s\t %16s\t %16s\t %16s\t \n' \
+            $(echo Name \#IRC rel_R\(hartree\) TS\(hartree\) rel_P\(hartree\))
+            printf '%10s\t %4i\t %16.10f\t %16.10f\t %16.10f\n' \
+            $(cat IRC.dat)
+        fi
+
+        rm -f $StatFile $ClassFile
+    fi
+}
+
+function stdoutStatResult(){
+    # $1 = $Total
+    # $2 = $Success
+    # $3 = $Fail
+
+cat << EOF
+#############################################################################
+Std-out the information of rawdata
+
+Count the amount of jobs:
+`printf '%8s\t %5i\t \n' $(echo Total: $1)`
+`printf '%8s\t %5i\t \n' $(echo Success: $2)`
+`printf '%8s\t %5i\t \n' $(echo Fail: $3)`
+
+EOF
+}
+
+function stdoutClassResult(){
+    # $1 = $SP
+    # $2 = $MIN
+    # $3 = $Saddle
+    # $4 = $IRC
+
+    [ `wc -l Fail.dat | awk '{print $1}' ` = 0 ] && FailFile='' || FailFile='Fail.dat'
+    [ $1 = 0 ] && SPFile=''     || SPFile='SP.dat'
+    [ $2 = 0 ] && MINFile=''    || MINFile='MIN.dat'
+    [ $3 = 0 ] && SaddleFile='' || SaddleFile='Saddle.dat'
+    [ $4 = 0 ] && IRCFile=''    || IRCFile='IRC.dat'
+
+cat << EOF
+Classification of the successful jobs:
+`printf '%8s\t %5i\t \n' $(echo SP: $1)`
+`printf '%8s\t %5i\t \n' $(echo MIN: $2)`
+`printf '%8s\t %5i\t \n' $(echo Saddle: $3)`
+`printf '%8s\t %5i\t \n' $(echo IRC: $4)`
+
+------------------------------------------------------------
+Output files: $FailFile $SPFile $MINFile $SaddleFile $IRCFile
+------------------------------------------------------------
+
+#############################################################################
+Detail of output:
+EOF
+}
+
+function showIllustration()
+{
+    echo $USAGE
+    read -r -s -p $'Press enter to view manual...\n'
+    /usr/bin/perl -x "$0"
+    exit
+}
+
+main $@
+
+exit
+
+# ====================== perl script start =========================
+#!/usr/bin/perl
+
+use strict;
+use Pod::Usage;
+pod2usage(-exitstatus => 0, -verbose => 2);
+
+__END__
+
+=head1 NAME
+
+checkEst - check and classify electronic structure theory (EST) program
+output file(s) (SP, MIN, Saddle, IRC).
+
+=head1 SYNOPSIS
+
+I<checkEst> -e I<program> [ options ] I<infile>
+
+=head2 Infile:
+
+Two modes are provided:
+
+=over 5
+
+=item 1. I<$infile> = B<filename>; check a single output file
+
+=item 2. I<$infile> = 'B<all>'; check all output files in the current folder
+
+=back
+
+=head2 Options:
+
+=over 8
+
+=item -h, --help    show this help message and exit
+
+=back
+
+=head3 B<EST related:>
+
+=over 8
+
+=item -e [B<g16|qchem|orca>]  assign EST program (default: B<orca>).
+
+=back
+
+=head1 EXAMPLES
+
+ Check all ORCA jobs in the current directory (default program):
+ ]$ checkEst all
+
+ Check a single Gaussian16 job:
+ ]$ checkEst -e g16 molecule.log
+
+ Check all Q-Chem jobs in the current directory:
+ ]$ checkEst -e qchem all
+
+=head1 AUTHOR
+
+=over 8
+
+=item 2026 - Grace Hsiao-Han Chuang <chuang@aci.uni-hannover.de>
+
+=back
+
+=cut

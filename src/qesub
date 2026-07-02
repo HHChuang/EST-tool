@@ -197,7 +197,7 @@ function genSLURMfile()
         for job in $part_jobname; do
             case $est in
                 'orca')   echo "\$(which orca) $job.inp > $job.out" >> $sname.sh ;;
-                'g16')    echo "g16 < $job.com > $job.log" >> $sname.sh ;;
+                'g16')    echo "g16 $job.com" >> $sname.sh ;;
                 'jellyfish') jellyfish_input $job >> $sname.sh ;;
                 'qchem')  echo "qchem -nt $prcs $job.inp $job.out" >> $sname.sh ;;
                 'molpro') echo "molpro < $job.inp > $job.out" >> $sname.sh ;;
@@ -218,7 +218,7 @@ cat << EOF > $1.sh
 
 #SBATCH --job-name=$1
 #SBATCH --partition=$partition
-#SBATCH --ntasks=$prcs
+#SBATCH --ntasks-per-node=$prcs
 #SBATCH --nodes=1
 #SBATCH --mem=$mem
 #SBATCH --time=$time
@@ -232,7 +232,7 @@ case $est in
         echo "module load GCC/13.2.0 OpenMPI/4.1.6 ORCA/6.1.0" >> $1.sh 
     ;;
     'g16')  
-        echo "module load Gaussian/16.C.01" >> $1.sh 
+        echo "module load Gaussian/g16.B01" >> $1.sh 
         ;;
     'jellyfish') 
         echo "export LD_LIBRARY_PATH=/bigwork/nhcahsch/envs/jellyfish/lib:\$LD_LIBRARY_PATH" >> $1.sh 
@@ -255,7 +255,7 @@ function showIllustration()
 {
     echo $USAGE
     read -r -s -p $'Press enter to view manual...\n' 
-    /usr/bin/perl -x $0
+    /usr/bin/perl -x "$0"
     exit 
 }
 
@@ -328,6 +328,8 @@ Four modes are provided:
 
 =item -t B<time>    specify the time limit for the job (format: HH:MM:SS).
 
+=item -m B<mem>     specify the memory allocation for the job (e.g., 8GB).
+
 =back
 
 =head1 EXAMPLES
@@ -345,7 +347,7 @@ Four modes are provided:
 
 =over 8
 
-=item 2026 - Hsiao-Han (Grace) Chuang <chuang@aci.uni-hannover.de>
+=item 2026 - Grace Hsiao-Han Chuang <chuang@aci.uni-hannover.de>
 
 =back 
 
