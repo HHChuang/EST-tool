@@ -19,10 +19,12 @@
 # Main program
 function main(){
     # 0. global variables setting
-        USAGE='Usage: checkEst [ -e g16|qchem|orca ] infile'
+        USAGE='Usage: checkEst [ -e g16|qchem|orca ] [ -r refDir ] [ -tol tolerance ] infile|sweep'
 
         est=''
         input=''
+        refDir=''  # -r: reference directory of known-good output files to diff against
+        tol='1e-6' # -tol: absolute tolerance (hartree) for energy/ZPE comparison vs refDir
 
     # 1. check arguments
         checkArg $@
@@ -33,21 +35,33 @@ function main(){
     # 3. print out purpose
         stdoutPurpose
 
-    # 4. check input argument, build job list
-        getNumJobs $input
+    # 4. run the check(+diff) pipeline: once here, or once per sweep_*/ node
+    #    directory (created by `qesub -w`) if $input == 'sweep'
+        if [ "$input" == 'sweep' ]; then
+            runSweepCheck
+        else
+            runEstCheck $input
+        fi
+}
+
+function runEstCheck(){
+    # $1 = input argument ('all' or a filename)
+
+    # 1. check input argument, build job list
+        getNumJobs $1
         NumJobs=$?
 
-    # 5. check each job is success or fail
+    # 2. check each job is success or fail
         checkJobs $NumJobs list.dat # output: statistic.dat
 
-    # 6. classify jobs into SP, MIN, Saddle or IRC
+    # 3. classify jobs into SP, MIN, Saddle or IRC
         classifyJobs statistic.dat
         # output : class.dat (SP.dat, MIN.dat, Saddle.dat, IRC.dat)
 
-    # 7. analyse the result of jobs and std-out
+    # 4. analyse the result of jobs and std-out (also diffs vs $refDir if set)
         analyseJobs statistic.dat class.dat SP.dat MIN.dat Saddle.dat IRC.dat
 
-    # 8. clean up any leftover per-job tmp files (e.g. Q-Chem's lastOne extract)
+    # 5. clean up any leftover per-job tmp files (e.g. Q-Chem's lastOne extract)
         rm -f *.tmp.$out_ext
 }
 
@@ -58,6 +72,14 @@ function checkArg()
         case $1 in
         '-e')
             est=$2
+            shift 2
+        ;;
+        '-r')
+            refDir=$2
+            shift 2
+        ;;
+        '-tol')
+            tol=$2
             shift 2
         ;;
         '-h'|'--help')
@@ -113,6 +135,8 @@ The extension of output file is : .$out_ext
 >> checkEst -e $est all
 2. Analyse only one $est output file
 >> checkEst -e $est \$(name).$out_ext
+3. Analyse + diff every node from 'qesub -w' against a reference directory
+>> checkEst -e $est -r \$(refDir) sweep
 
 #############################################################################
 EOF
@@ -132,6 +156,71 @@ function getNumJobs(){
         return 1
     ;;
     esac
+}
+
+function runSweepCheck(){
+    # Iterate every sweep_*/ node directory created by `qesub -w` in the
+    # current directory, running the full check(+diff) pipeline inside each,
+    # then print one aggregate table across all nodes swept.
+    # output: SweepSummary.dat (one row per node)
+
+    rm -f SweepSummary.dat
+    local sawAny=0
+
+    for dir in sweep_*/
+    do
+        [ -d "$dir" ] || continue
+        sawAny=1
+        local node=$(basename "$dir")
+        node=${node#sweep_}
+
+        ( cd "$dir" && runEstCheck 'all' ) > "${node}.checkEst.log" 2>&1
+
+        local total=0 success=0 fail=0
+        if [ -f "$dir/Summary.dat" ]; then
+            read total success fail _ _ _ _ < "$dir/Summary.dat"
+        fi
+
+        local reftotal='-' refpass='-' refmismatch='-' refregression='-' refnoref='-'
+        if [ -f "$dir/RefSummary.dat" ]; then
+            read reftotal refpass refmismatch refregression refnoref < "$dir/RefSummary.dat"
+        fi
+
+        echo "$node $total $success $fail $reftotal $refpass $refmismatch $refregression $refnoref" >> SweepSummary.dat
+    done
+
+    if [ "$sawAny" == "0" ]; then
+        echo "No sweep_*/ directories found in $(pwd) (expected output of 'qesub -w')" >&2
+        exit 1
+    fi
+
+    stdoutSweepResult SweepSummary.dat
+}
+
+function stdoutSweepResult(){
+    # $1 = SweepSummary.dat
+cat << EOF
+#############################################################################
+Sweep report across $(wc -l < $1) node(s), each checked with:
+>> checkEst -e $est $([ -n "$refDir" ] && echo "-r $refDir") all
+
+EOF
+    if [ -n "$refDir" ]; then
+        printf '%14s\t %6s\t %8s\t %5s\t %9s\t %11s\t %8s\t\n' \
+            Node Total Success Fail Pass Mismatch Regression
+        while read node total success fail reftotal refpass refmismatch refregression refnoref; do
+            printf '%14s\t %6i\t %8i\t %5i\t %9s\t %11s\t %8s\t\n' \
+                "$node" "$total" "$success" "$fail" "$refpass" "$refmismatch" "$refregression"
+        done < $1
+    else
+        printf '%14s\t %6s\t %8s\t %5s\t\n' Node Total Success Fail
+        while read node total success fail _ _ _ _ _; do
+            printf '%14s\t %6i\t %8i\t %5i\t\n' "$node" "$total" "$success" "$fail"
+        done < $1
+    fi
+    echo ""
+    echo "Per-node detail (full SP/MIN/Saddle/IRC/diff listing): <node>.checkEst.log"
+    echo "#############################################################################"
 }
 
 function ircKeyword(){
@@ -535,6 +624,118 @@ function extractIRC_orca(){
     rm -f tmp.irc.dat
 }
 
+# ---- diffAgainstRef: compare this directory's classified results against
+#      known-good reference output files (e.g. Gaussian's own shipped test
+#      suite logs), matched by job name. Must run after classifyJobs (needs
+#      class.dat) and before analyseJobs's cleanup removes class.dat/Fail.dat.
+#      Reads reference logs straight out of $1 by full path; never writes
+#      there, so a read-only reference directory (e.g. a software module
+#      tree) is fine.
+function diffAgainstRef(){
+    # $1 = refDir
+    local ref=$1
+    rm -f Diff.dat RefSummary.dat
+
+    cat class.dat Fail.dat 2>/dev/null | awk '{print $1}' | sort -u > AllJobs.dat
+
+    for job in `cat AllJobs.dat`
+    do
+        refFile="$ref/$job.$out_ext"
+        if [ ! -e "$refFile" ]; then
+            echo "$job NO_REFERENCE" >> Diff.dat
+            continue
+        fi
+
+        refEnd=$(grep -c "$termKeyword" $refFile)
+        curFail=$(grep -c "^${job}\$" Fail.dat 2>/dev/null)
+
+        if [ "$refEnd" == "0" ] && [ "$curFail" == "0" ]; then
+            echo "$job REGRESSION:ref_fails_target_succeeds" >> Diff.dat
+            continue
+        fi
+        if [ "$refEnd" != "0" ] && [ "$curFail" != "0" ]; then
+            echo "$job REGRESSION:target_fails_ref_succeeds" >> Diff.dat
+            continue
+        fi
+        if [ "$refEnd" == "0" ] && [ "$curFail" != "0" ]; then
+            echo "$job PASS(both_fail)" >> Diff.dat
+            continue
+        fi
+
+        # both terminated normally: compare classification, then energy
+        curClass=$(grep "^$job " class.dat | awk '{print $2}')
+
+        numIRCref=$(grep -c "$(ircKeyword)" $refFile)
+        if [ "$numIRCref" != "0" ]; then
+            refClass='IRC'
+        else
+            countIF $refFile
+            numIFref=$(head -n 1 IF.dat | awk '{print $1}')
+            rm -f IF.dat
+            if [ "$numIFref" != "0" ]; then
+                refClass='Saddle'
+            elif hasFrequencyBlock $refFile; then
+                refClass='MIN'
+            else
+                refClass='SP'
+            fi
+        fi
+
+        if [ "$curClass" != "$refClass" ]; then
+            echo "$job MISMATCH:classification target=$curClass ref=$refClass" >> Diff.dat
+            continue
+        fi
+
+        extractE $refFile
+        refE=$(cat E.dat); rm -f E.dat
+
+        # SP/MIN/Saddle.dat are tab-delimited (built with `paste`), so match
+        # on awk's first field rather than grep'ing a literal space.
+        case $curClass in
+            'SP')     curE=$(awk -v j="$job" '$1==j{print $2; exit}' SP.dat     2>/dev/null) ;;
+            'MIN')    curE=$(awk -v j="$job" '$1==j{print $2; exit}' MIN.dat    2>/dev/null) ;;
+            'Saddle') curE=$(awk -v j="$job" '$1==j{print $2; exit}' Saddle.dat 2>/dev/null) ;;
+            'IRC')    curE='' ;; # IRC.dat carries relative R/TS/P, not one E; skip
+        esac
+
+        if [ -n "$curE" ] && [ -n "$refE" ]; then
+            over=$(awk -v a="$curE" -v b="$refE" -v t="$tol" \
+                'BEGIN{d=a-b; if(d<0)d=-d; print (d>t)?1:0}')
+            if [ "$over" == "1" ]; then
+                echo "$job MISMATCH:energy target=$curE ref=$refE" >> Diff.dat
+            else
+                echo "$job PASS" >> Diff.dat
+            fi
+        else
+            echo "$job PASS" >> Diff.dat
+        fi
+    done
+    rm -f AllJobs.dat
+
+    local total=$(wc -l < Diff.dat)
+    local pass=$(grep -c 'PASS' Diff.dat)
+    local mismatch=$(grep -c 'MISMATCH' Diff.dat)
+    local regression=$(grep -c 'REGRESSION' Diff.dat)
+    local noref=$(grep -c 'NO_REFERENCE' Diff.dat)
+
+    echo "$total $pass $mismatch $regression $noref" > RefSummary.dat
+
+    echo ""
+    echo "----- Diff vs reference ($ref) -----"
+    printf '%12s\t %5i\t \n' $(echo Total: $total)
+    printf '%12s\t %5i\t \n' $(echo Pass: $pass)
+    printf '%12s\t %5i\t \n' $(echo Mismatch: $mismatch)
+    printf '%12s\t %5i\t \n' $(echo Regression: $regression)
+    printf '%12s\t %5i\t \n' $(echo NoReference: $noref)
+
+    if [ "$mismatch" != "0" ] || [ "$regression" != "0" ]
+    then
+        echo ""
+        echo '----- Details (non-PASS) -----'
+        grep -v ' PASS' Diff.dat
+    fi
+}
+
 function analyseJobs(){
     # $1 = statistic.dat
     # $2 = class.dat
@@ -558,6 +759,8 @@ function analyseJobs(){
     Saddle=$(grep -c Saddle $ClassFile)
     IRC=$(grep -c IRC $ClassFile)
     grep Fail $StatFile | awk '{print $1}' > Fail.dat
+
+    echo "$Total $Success $Fail ${SP:-0} ${MIN:-0} ${Saddle:-0} ${IRC:-0}" > Summary.dat
 
     stdoutStatResult $Total $Success $Fail
 
@@ -607,6 +810,8 @@ function analyseJobs(){
             printf '%10s\t %4i\t %16.10f\t %16.10f\t %16.10f\n' \
             $(cat IRC.dat)
         fi
+
+        [ -n "$refDir" ] && diffAgainstRef $refDir
 
         rm -f $StatFile $ClassFile
     fi
@@ -689,13 +894,16 @@ I<checkEst> -e I<program> [ options ] I<infile>
 
 =head2 Infile:
 
-Two modes are provided:
+Three modes are provided:
 
 =over 5
 
 =item 1. I<$infile> = B<filename>; check a single output file
 
 =item 2. I<$infile> = 'B<all>'; check all output files in the current folder
+
+=item 3. I<$infile> = 'B<sweep>'; check + aggregate every C<sweep_*/> node
+directory created by C<qesub -w> in the current folder, one row per node.
 
 =back
 
@@ -713,6 +921,14 @@ Two modes are provided:
 
 =item -e [B<g16|qchem|orca>]  assign EST program (default: B<orca>).
 
+=item -r B<refDir>  diff extracted energy/ZPE/imaginary-frequencies and
+pass/fail status against same-named reference output files in B<refDir>
+(e.g. Gaussian's own shipped C<tests/amd64> reference logs). Read-only:
+never writes into B<refDir>.
+
+=item -tol B<tolerance>  absolute tolerance for the B<-r> energy/ZPE
+comparison, in the units printed for that quantity (default: B<1e-6>).
+
 =back
 
 =head1 EXAMPLES
@@ -725,6 +941,13 @@ Two modes are provided:
 
  Check all Q-Chem jobs in the current directory:
  ]$ checkEst -e qchem all
+
+ Check a single Gaussian16 job against a reference output:
+ ]$ checkEst -e g16 -r $g16root/g16/tests/amd64 test0233.log
+
+ Aggregate + diff every node swept by 'qesub -e g16 -w all all' against
+ Gaussian's own shipped reference logs for this architecture:
+ ]$ checkEst -e g16 -r $g16root/g16/tests/amd64 sweep
 
 =head1 AUTHOR
 

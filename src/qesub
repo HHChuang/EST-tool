@@ -11,8 +11,8 @@
 
 # Main program
 function main(){
-    # 0. global variables setting 
-        USAGE='Usage: qesub [ -e orca|g16|jellyfish|qchem|molpro ] [ -np procs ] infile'
+    # 0. global variables setting
+        USAGE='Usage: qesub [ -e orca|g16|jellyfish|qchem|molpro ] [ -np procs ] [ -w node|all|node1,node2,... ] [ -N n|auto ] infile'
 
         debug=''
         threads=1
@@ -21,25 +21,35 @@ function main(){
         time='24:00:00'        # Default time limit
         tag=''
         prcs=1                # DEFAULT PROCESSORS (Allows 'qesub he.inp' to work)
+        sweep=''              # -w: node-sweep spec (unset = original split behaviour)
+        nNodeOpt=''           # -N: non-interactive batch count ('auto' = 1 per partition node)
 
     # 1. check arguments
-        checkArg $@ 
-    
+        checkArg $@
+
     # 2. check and count input files
-        genlist $checkArg $input 
-    
-    # 3. user defined: select amount of nodes/batches
-        getNnodefunc list.dat 
+        genlist $checkArg $input
 
-    # 4. generate SLURM batch scripts
-        genSLURMfile $getNnode list.dat 
+    # 3. generate SLURM batch scripts: either sweep the full job list across
+    #    one or more pinned nodes (-w), or split the job list across N nodes
+    #    for throughput (interactively via -N, or automatically via -N auto)
+        if [ -n "$sweep" ]; then
+            genSweepSLURMfiles list.dat
+        else
+            if [ -n "$nNodeOpt" ]; then
+                resolveAutoNodeCount list.dat
+            else
+                getNnodefunc list.dat
+            fi
+            genSLURMfile $getNnode list.dat
+        fi
 
-    # 5. submit jobs
+    # 4. submit jobs
         for name in `cat SLURMlist.dat`
-        do 
-            sbatch $name 
-        done 
-        rm -f SLURMlist.dat 
+        do
+            sbatch $name
+        done
+        rm -f SLURMlist.dat
 }
 
 function checkArg()
@@ -51,11 +61,19 @@ function checkArg()
             est=$2
             shift 2
         ;;
-        '-np') 
+        '-np')
             prcs=$2
             shift 2
         ;;
-        '-p') 
+        '-w')
+            sweep=$2
+            shift 2
+        ;;
+        '-N')
+            nNodeOpt=$2
+            shift 2
+        ;;
+        '-p')
             partition=$2
             shift 2
         ;;
@@ -140,7 +158,7 @@ function genlist()
         rm -f list.dat; touch list.dat 
         for name in `cat alljobs.dat`; do 
             case "$est" in
-            # FIXME: what is the keyword of normal terminationfor jellyfish and molpro? 
+            # FIXME: what is the keyword of normal termination for jellyfish and molpro? 
                 'orca') num=$(grep -c 'ORCA TERMINATED NORMALLY' $name.$out_ext) ;;
                 'qchem') num=$(grep -c 'Have a nice day' $name.$out_ext) ;;
                 'g16') num=$(grep -c 'Normal termination' $name.$out_ext) ;;
@@ -163,6 +181,23 @@ function getNnodefunc()
         read -p 'How many batch files do you want to split into? ' getNnode
         echo '--------------------------------------------------------'
     fi
+}
+
+function resolveAutoNodeCount()
+{
+    # $1 = list.dat; sets $getNnode non-interactively from -N (skips the
+    # getNnodefunc prompt). Batches are NOT pinned to a node (no --nodelist)
+    # -- SLURM's own scheduler spreads them across whichever nodes are free.
+    njobs=$(wc -l $1 | awk '{print $1}')
+
+    if [ "$nNodeOpt" == 'auto' ]; then
+        getNnode=$(sinfo -p $partition -N -h -o "%N" | sort -u | wc -l | awk '{print $1}')
+    else
+        getNnode=$nNodeOpt
+    fi
+
+    [ "$getNnode" -gt "$njobs" ] && getNnode=$njobs
+    [ "$getNnode" -lt 1 ] && getNnode=1
 }
 
 function genSLURMfile()
@@ -195,20 +230,86 @@ function genSLURMfile()
         ini_job=$(( $ini_job + $joblen ))
         
         for job in $part_jobname; do
-            case $est in
-                'orca')   echo "\$(which orca) $job.inp > $job.out" >> $sname.sh ;;
-                'g16')    echo "g16 $job.com" >> $sname.sh ;;
-                'jellyfish') jellyfish_input $job >> $sname.sh ;;
-                'qchem')  echo "qchem -nt $prcs $job.inp $job.out" >> $sname.sh ;;
-                'molpro') echo "molpro < $job.inp > $job.out" >> $sname.sh ;;
-            esac
+            appendJobCmd $job $sname.sh
         done
-        echo $sname.sh >> SLURMlist.dat 
-    done 
+        echo $sname.sh >> SLURMlist.dat
+    done
+}
+
+function appendJobCmd()
+{
+    # $1 = job basename, $2 = SLURM script file to append the run command to
+    local job=$1
+    local scriptfile=$2
+    case $est in
+        'orca')   echo "\$(which orca) $job.inp > $job.out" >> $scriptfile ;;
+        'g16')    echo "g16 $job.com" >> $scriptfile ;;
+        'jellyfish') jellyfish_input $job >> $scriptfile ;;
+        'qchem')  echo "qchem -nt $prcs $job.inp $job.out" >> $scriptfile ;;
+        'molpro') echo "molpro < $job.inp > $job.out" >> $scriptfile ;;
+    esac
+}
+
+function resolveNodeList()
+{
+    # sets node.dat: one "<node> <partition>" pair per line, resolved from
+    # $sweep. $partition may itself be a comma-separated list of partitions
+    # (e.g. 'mpp.share,mpp.single,smp') -- each is queried separately via
+    # sinfo so every node keeps the correct partition to submit into.
+    rm -f node.dat
+    if [ "$sweep" == 'all' ]; then
+        for part in $(echo $partition | tr ',' ' '); do
+            sinfo -p $part -N -h -o "%N" | sort -u \
+                | awk -v p=$part '{print $1, p}' >> node.dat
+        done
+    else
+        # explicit node name(s): partition is ambiguous if -p was also
+        # given as a list, so all of them are submitted to the first
+        # partition named in -p.
+        local firstPart=$(echo $partition | cut -d',' -f1)
+        echo $sweep | tr ',' '\n' | awk -v p=$firstPart '{print $1, p}' > node.dat
+    fi
+}
+
+function genSweepSLURMfiles()
+{
+    # $1 = list.dat (full job list; every node below runs *all* of it,
+    #      unlike genSLURMfile which splits the list across nodes)
+    jobname=( `cat $1` )
+    [ $checkArg -ne 4 ] && rm -f list.dat
+
+    resolveNodeList
+
+    rm -f SLURMlist.dat
+    while read node part
+    do
+        sname="sweep_${node}"
+        mkdir -p $sname
+        for job in "${jobname[@]}"; do
+            cp $job.$inp_ext $sname/
+        done
+
+        SLURMheader $sname $sname $node $part
+
+        for job in "${jobname[@]}"; do
+            appendJobCmd $job $sname.sh
+        done
+        echo $sname.sh >> SLURMlist.dat
+    done < node.dat
+    rm -f node.dat
 }
 
 function SLURMheader()
 {
+    # $1 = script name (without .sh)
+    # $2 = optional: subdir (relative to $SLURM_SUBMIT_DIR) to cd into before running
+    # $3 = optional: node name to pin the job to via --nodelist
+    # $4 = optional: partition to submit into (defaults to $partition; used
+    #      when $partition was given as a comma-separated multi-partition list)
+    local subdir=$2
+    local node=$3
+    local part=${4:-$partition}
+
 cat << EOF > $1.sh
 #!/bin/bash -l
 #####################################################################
@@ -217,7 +318,12 @@ cat << EOF > $1.sh
 #####################################################################
 
 #SBATCH --job-name=$1
-#SBATCH --partition=$partition
+#SBATCH --partition=$part
+EOF
+
+[ -n "$node" ] && echo "#SBATCH --nodelist=$node" >> $1.sh
+
+cat << EOF >> $1.sh
 #SBATCH --ntasks-per-node=$prcs
 #SBATCH --nodes=1
 #SBATCH --mem=$mem
@@ -243,7 +349,7 @@ esac
 echo '' >> $1.sh 
 
 cat << EOF >> $1.sh
-cd \$SLURM_SUBMIT_DIR
+cd \$SLURM_SUBMIT_DIR${subdir:+/$subdir}
 echo 'Job starts'
 echo "    Host: \$HOSTNAME"
 echo '    Date:' \`date\`
@@ -286,49 +392,104 @@ Four modes are provided:
 
 =over 5
 
-=item 1. I<$infile> = B<filename>; submit single job
+=item 1. I<$infile> = B<filename>; submit a single job
+
+ ]$ qesub molecule.com
 
 =item 2. I<$infile> = 'B<all>'; submit all jobs in the current folder
 
-=item 3. I<$infile> = 'B<fail>'; submit failed jobs
+ ]$ qesub all
 
-=item 4. I<$infile> = B<*.dat>; submit selected jobs in a list
+=item 3. I<$infile> = 'B<fail>'; resubmit only the jobs that failed last time
+
+ ]$ qesub fail
+
+=item 4. I<$infile> = B<*.dat>; submit the jobs listed in a I<.dat> file (one
+job name per line)
+
+ ]$ qesub joblist.dat
 
 =back
 
 =head2 Options:
 
+=head3 General:
+
 =over 8
+
+=item -h, --help
+
+Show this help message and exit.
 
 =back
 
-=head3
+=head3 EST related:
 
 =over 8
 
-=item -h, --help    show this help message and exit
+=item -e B<orca|g16|jellyfish|qchem|molpro>
+
+Assign the EST program (default: guessed from the input file extension).
 
 =back
 
-=head3 B<EST related:>
+=head3 SLURM related:
 
 =over 8
 
-=item -e [B<orca|g16|jellyfish>]      assign EST program 
+=item -np B<procs>
 
-=back
+Invoke a parallel job with B<procs> cpus.
 
-=head3 B<SLURM related:>
+=item -p B<partition>[,B<partition2>,...]
 
-=over 8
+Specify the SLURM partition. With B<-w all>, this may instead be a
+comma-separated list (e.g. C<mpp.share,mpp.single,smp>) to sweep every node
+across all of those partitions in a single invocation -- each node is still
+submitted into its own correct partition.
 
-=item -np B<procs>  invoke a parallel job with B<procs> cpus.
+=item -t B<time>
 
-=item -p B<partition>    specify the SLURM partition.
+Specify the time limit for the job. Passed straight through to SLURM's
+C<--time>, which accepts several formats (hours are not capped at 24 in the
+plain forms, so C<48:00:00> is just as valid as C<2-00:00:00>):
 
-=item -t B<time>    specify the time limit for the job (format: HH:MM:SS).
+ MM               minutes
+ MM:SS            minutes:seconds
+ HH:MM:SS         hours:minutes:seconds   (default: 24:00:00)
+ D-HH             days-hours
+ D-HH:MM          days-hours:minutes
+ D-HH:MM:SS       days-hours:minutes:seconds
 
-=item -m B<mem>     specify the memory allocation for the job (e.g., 8GB).
+Use the C<D-HH...> form when a limit is easier to read in days, e.g. a
+C<-w>/C<-N> run over a large job list that needs more than a day per node.
+
+=item -m B<mem>
+
+Specify the memory allocation for the job (e.g. 8GB).
+
+=item -w B<node>|B<all>|B<node1,node2,...>
+
+Sweep mode: submit the I<entire> job list once per node, each pinned via
+C<--nodelist>, instead of splitting the job list across nodes. C<all> expands
+to every node currently in B<-p> (which may itself list several partitions).
+Each node's output goes into its own C<sweep_NODE/> directory so runs don't
+collide.
+
+Use this to test a program/binary across every node of a partition, e.g.
+after a module update -- follow up with C<checkEst -r refDir sweep> to check
+the results.
+
+=item -N B<n>|B<auto>
+
+Distribute (not replicate) the job list across B<n> batches, non-interactively
+-- skips the "how many batch files?" prompt. C<auto> sets B<n> to the number
+of nodes currently in B<-p>, capped at the job count.
+
+Batches are I<not> pinned to a node (no C<--nodelist>): SLURM's own scheduler
+spreads them across whichever nodes are free -- one job per node if there are
+enough free nodes, otherwise several jobs per node. Mutually exclusive with
+B<-w>.
 
 =back
 
@@ -340,8 +501,24 @@ Four modes are provided:
  Submit an ORCA job with 8 cores:
  ]$ qesub -np 8 molecule.inp 
 
- Submit all the jobs in the current directory: 
- ]$ qesub all 
+ Submit all the jobs in the current directory:
+ ]$ qesub all
+
+ Sweep all jobs across every node of mpp.share (e.g. verifying a Gaussian
+ module update on every node, one full test-suite run per node):
+ ]$ qesub -e g16 -p mpp.share -w all all
+
+ Sweep all jobs across every node of every AMD partition in one call
+ (no loop needed, so nothing gets submitted twice):
+ ]$ qesub -e g16 -p mpp.share,mpp.single,smp -w all all
+
+ Distribute (not replicate) all jobs across mpp.share automatically, one
+ batch per node in the partition, unpinned (SLURM schedules each batch):
+ ]$ qesub -e g16 -p mpp.share -N auto all
+
+ Sweep a large test suite (each node runs the full list sequentially) with
+ a 2-day time limit instead of the 24h default:
+ ]$ qesub -e g16 -p mpp.share -w all -t 2-00:00:00 all
 
 =head1 AUTHOR
 
